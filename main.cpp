@@ -1,17 +1,8 @@
 #include <array>
-#include <cstdint>
-#include <cstring>
-#include <dlfcn.h>
-#include <iostream>
-#include <limits>
-#include <math.h>
-#include <omp.h>
 #include <raylib.h>
 #include <raymath.h>
-#include <stdio.h>
+#include <sstream>
 #include <string>
-#include <sys/cdefs.h>
-#include <sys/types.h>
 #include <variant>
 #define FONTSIZE 75
 
@@ -241,9 +232,9 @@ std::string to_string(BINOPS op) {
 std::string to_string(UNOPS op) {
   switch (op) {
   case UNOPS::SIN:
-    return "sinf";
+    return "sin";
   case UNOPS::COS:
-    return "cosf";
+    return "cos";
   case UNOPS::POW2:
     return "pow";
   case UNOPS::SQRT:
@@ -314,6 +305,7 @@ void write_expr(const GenericNode &node, FILE *f) {
       node);
 }
 
+#if 0
 float (*codegen(const GenericNode &node))(float, float, float) {
   static std::string last_so = "";
   int rand_id = rand();
@@ -359,10 +351,101 @@ float (*codegen(const GenericNode &node))(float, float, float) {
   last_so = so_file;
   return reinterpret_cast<float (*)(float, float, float)>(sym);
 }
+#endif
 
-float wrap(float x, float min, float max) {
-  const float range = max - min;
-  return min + std::fmod((x - min + range), range);
+void write_expr(const GenericNode &node, std::ostream &out) {
+  std::visit(
+      [&](auto &&n) {
+        using T = std::decay_t<decltype(n)>;
+        if constexpr (std::is_same_v<T, NodeNumber *>) {
+          out << n->v;
+        } else if constexpr (std::is_same_v<T, NodeVariable *>) {
+          out << n->v;
+        } else if constexpr (std::is_same_v<T, NodeUnary *>) {
+          switch (n->op) {
+          case UNOPS::POW2:
+            out << "(";
+            write_expr(n->lhs, out);
+            out << ") * (";
+            write_expr(n->lhs, out);
+            out << ")";
+            break;
+          case UNOPS::SQRT:
+            out << "sqrt(abs(";
+            write_expr(n->lhs, out);
+            out << "))";
+            break;
+          case UNOPS::SIN:
+          case UNOPS::COS:
+            out << to_string(n->op) << "(2.0 * 3.14159265 * ";
+            write_expr(n->lhs, out);
+            out << ")";
+            break;
+          default:
+            out << to_string(n->op) << "(";
+            write_expr(n->lhs, out);
+            out << ")";
+            break;
+          }
+        } else if constexpr (std::is_same_v<T, NodeBinary *>) {
+          out << "(";
+          write_expr(n->lhs, out);
+          out << " " << to_string(n->op) << " ";
+          write_expr(n->rhs, out);
+          out << ")";
+        }
+      },
+      node);
+}
+
+std::string codegen_glsl(const GenericNode &node) {
+  std::ostringstream ss;
+  ss << "#version 330 core\n";
+  ss << "out vec4 FragColor;\n";
+  ss << "uniform vec2 resolution;\n";
+  ss << "uniform float time;\n\n";
+  ss << "float wrap(float x, float minVal, float maxVal) {\n";
+  ss << "    float range = maxVal - minVal;\n";
+  ss << "    return minVal + mod((x - minVal + range), range);\n";
+  ss << "}\n\n";
+  ss << "void main() {\n";
+  ss << "    vec2 uv = gl_FragCoord.xy / resolution;\n";
+  ss << "    float x = uv.x * 2.0 - 1.0;\n";
+  ss << "    float y = uv.y * 2.0 - 1.0;\n";
+  ss << "    float t = time / 5.0;\n";
+  ss << "    float raw = ";
+  write_expr(node, ss);
+  ss << ";\n";
+  ss << "    float value = wrap(raw + 1.0, 0.0, 1.0);\n";
+  ss << "    FragColor = vec4(vec3(value), 1.0);\n";
+  ss << "}\n";
+  return ss.str();
+}
+
+std::string codegen_glsl_sawtooth(const GenericNode &node) {
+  std::ostringstream ss;
+  ss << "#version 330 core\n";
+  ss << "out vec4 FragColor;\n";
+  ss << "uniform vec2 resolution;\n";
+  ss << "uniform float time;\n\n";
+  ss << "float saw(float x) {\n";
+  ss << "    return fract(x);\n";
+  ss << "}\n\n";
+  ss << "void main() {\n";
+  ss << "    vec2 uv = gl_FragCoord.xy / resolution;\n";
+  ss << "    float x = uv.x * 2.0 - 1.0;\n";
+  ss << "    float y = uv.y * 2.0 - 1.0;\n";
+  ss << "    float t = time / 5.0;\n";
+  ss << "    float pulse = 1.0 + 0.5 * sin(6.2831 * t);\n";
+  ss << "    float base = ";
+  write_expr(node, ss);
+  ss << ";\n";
+  ss << "    float r = saw(base * 2.0 + 0.0) * pulse;\n";
+  ss << "    float g = saw(base * 1.5 + 0.33) * pulse;\n";
+  ss << "    float b = saw(base * -3.0 + 0.67) * pulse;\n";
+  ss << "    FragColor = vec4(clamp(vec3(r, g, b), 0.0, 1.0), 1.0);\n";
+  ss << "}\n";
+  return ss.str();
 }
 
 template <std::floating_point T, typename F>
@@ -407,61 +490,14 @@ struct MusicLorentzOscillator {
     pos = getAttractor(pos, dt);
     return Vector3Length(pos);
   }
-  
+
   Vector3 stepv() {
     pos = getAttractor(pos, dt);
     return pos;
   }
 };
-MusicLorentzOscillator music_osc{};
 
-int demo(Scene *sc, BumpAllocator *arena, BumpAllocator *music_arena,
-         float dur) {
-  (void)music_arena;
-  const int screenWidth = GetScreenWidth();
-  const int screenHeight = GetScreenHeight();
-  constexpr int depth = 8;
-  arena->release();
-  auto ast = generate_random_ast_arena(depth, arena);
-  auto paint_fn = codegen(ast);
-  float actual_time = 0.0;
-  
-  Sound snd = LoadSoundFromWave(sc->wave);
-  // Sound snd = LoadSound(music_file);
-  PlaySound(snd);
-  Color *const colors = ((Color *)sc->img.data);
-  while (!WindowShouldClose() && actual_time < dur) {
-#pragma omp parallel for
-    for (int y = 0; y < screenHeight; ++y) {
-#pragma omp simd
-      for (int x = 0; x < screenWidth; ++x) {
-        const float xx = 2.0f * (x / (float)screenWidth) - 1.0f;
-        const float yy = 2.0f * (y / (float)screenHeight) - 1.0f;
-        const auto r =
-            wrap(paint_fn(xx, yy, sc->time / 5.0f) + 1.0f, 0.0f, 1.0f);
-        const auto cc = (unsigned char)(r * 255.0f);
-        // ImageDrawPixel(&sc->img, x, y, Color{cc, cc, cc, cc});
-        colors[x + y * screenWidth] = Color{cc, cc, cc, 255};
-      }
-    }
-    if (sc->time > 5) {
-      sc->time = 0.0;
-      arena->release();
-      ast = generate_random_ast_arena(depth, arena);
-      paint_fn = codegen(ast);
-    }
-    sc->time += GetFrameTime() / 2;
-    actual_time += GetFrameTime();
-    UpdateTexture(sc->tex, sc->img.data);
-    BeginDrawing();
-    // ClearBackground(RAYWHITE);
-    DrawTexture(sc->tex, 0, 0, WHITE);
-    DrawFPS(0, 0);
-    EndDrawing();
-  }
-  UnloadSound(snd);
-  return 0;
-}
+MusicLorentzOscillator music_osc{};
 
 const char *intro_texts(float t) {
   if (t < 4.0) {
@@ -474,7 +510,7 @@ const char *intro_texts(float t) {
     return "By GreenHouse!";
   }
   if (t >= 12.0 && t < 16) {
-    return "..in under 31 KB!";
+    return "..in under 27 KB!";
   }
   if (t >= 16.0 && t < 20) {
     return " 27 KB? LMFAO! <3";
@@ -522,25 +558,56 @@ void intro(Scene *sc, BumpAllocator *arena, float dur) {
   arena->release();
 }
 
-// void outro(Scene *sc, BumpAllocator *arena, float dur) {
-//   (void)arena;
-//   (void)sc;
-//   const float W = GetScreenWidth();
-//   const float H = GetScreenHeight();
-//   float actual_time = 0.0;
-//   Sound snd = LoadSoundFromWave(sc->wave);
-//   PlaySound(snd);
-//   const char *msg = "See you next year!";
-//   int text_width = MeasureText(msg, 100);
-//   while (!WindowShouldClose() && actual_time < dur) {
-//     BeginDrawing();
-//     ClearBackground(BLACK);
-//     DrawText(msg, W / 2.0f - 0.5 * text_width, H / 2.0f, FONTSIZE, ORANGE);
-//     actual_time += GetFrameTime();
-//     EndDrawing();
-//   }
-//   UnloadSound(snd);
-// }
+int demo(Scene *sc, BumpAllocator *arena, BumpAllocator *music_arena,
+         float dur) {
+  (void)music_arena;
+  const int screenWidth = GetScreenWidth();
+  const int screenHeight = GetScreenHeight();
+  int depth = 8;
+  arena->release();
+  auto ast = generate_random_ast_arena(depth, arena);
+  auto glsl_str = codegen_glsl_sawtooth(ast);
+  float actual_time = 0.0;
+
+  Sound snd = LoadSoundFromWave(sc->wave);
+  PlaySound(snd);
+  Shader shader = LoadShaderFromMemory(0, glsl_str.c_str());
+  int locTime, locRes;
+
+  locRes = GetShaderLocation(shader, "resolution");
+  locTime = GetShaderLocation(shader, "time");
+  float resolution[2] = {(float)screenWidth, (float)screenHeight};
+  SetShaderValue(shader, locRes, resolution, SHADER_UNIFORM_VEC2);
+  while (!WindowShouldClose() && actual_time < dur) {
+    if (sc->time > 2) {
+      // depth++;
+      sc->time = 0.0;
+      arena->release();
+      ast = generate_random_ast_arena(depth, arena);
+      glsl_str = codegen_glsl_sawtooth(ast);
+      UnloadShader(shader);
+      shader = LoadShaderFromMemory(0, glsl_str.c_str());
+      locRes = GetShaderLocation(shader, "resolution");
+      locTime = GetShaderLocation(shader, "time");
+      SetShaderValue(shader, locRes, resolution, SHADER_UNIFORM_VEC2);
+      SetShaderValue(shader, locTime, &sc->time, SHADER_UNIFORM_FLOAT);
+    }
+    SetShaderValue(shader, GetShaderLocation(shader, "time"), &sc->time,
+                   SHADER_UNIFORM_FLOAT);
+    BeginDrawing();
+    ClearBackground(WHITE);
+    BeginShaderMode(shader);
+    DrawRectangle(0, 0, screenWidth, screenHeight, WHITE);
+    EndShaderMode();
+    DrawFPS(0, 0);
+    sc->time += GetFrameTime() / 2;
+    actual_time += GetFrameTime();
+    EndDrawing();
+  }
+  UnloadSound(snd);
+  UnloadShader(shader);
+  return 0;
+}
 
 void outro(Scene *sc, BumpAllocator *arena, float dur) {
   (void)arena;
@@ -579,8 +646,6 @@ void outro(Scene *sc, BumpAllocator *arena, float dur) {
   arena->release();
 }
 
-
-
 // Singature has to be (float,....)
 float custom_track_0(float t, const std::array<float, 3> &freqs) {
   float out = 0.0f;
@@ -591,23 +656,12 @@ float custom_track_0(float t, const std::array<float, 3> &freqs) {
 }
 
 float custom_track_1(float t) {
-  constexpr std::array<float, 100> freqs = {
-      207.0f, 206.5f, 207.5f, 555.0f, 556.5f, 554.0f, 206.0f, 552.5f, 208.0f,
-      551.0f, 209.0f, 549.5f, 209.5f, 550.5f, 548.5f, 210.0f, 210.5f, 547.5f,
-      211.0f, 546.5f, 212.0f, 211.5f, 545.0f, 212.5f, 213.0f, 213.5f, 544.0f,
-      543.0f, 214.0f, 542.0f, 215.0f, 214.5f, 541.0f, 540.0f, 215.5f, 539.0f,
-      538.0f, 216.0f, 537.0f, 216.5f, 536.0f, 217.0f, 217.5f, 218.0f, 218.5f,
-      535.0f, 534.0f, 533.0f, 219.0f, 219.5f, 220.0f, 532.0f, 220.5f, 531.0f,
-      221.0f, 530.0f, 222.0f, 229.0f, 228.0f, 534.5f, 533.5f, 224.0f, 225.0f,
-      226.0f, 535.5f, 536.5f, 223.0f, 537.5f, 538.5f, 227.0f, 539.5f, 540.5f,
-      230.0f, 231.0f, 541.5f, 542.5f, 232.0f, 233.0f, 234.0f, 543.5f, 544.5f,
-      545.5f, 235.0f, 236.0f, 237.0f, 546.0f, 547.0f, 548.0f, 238.0f, 239.0f,
-      549.0f, 550.0f, 240.0f, 241.0f, 551.5f, 552.0f, 242.0f, 553.0f, 553.5f,
-      243.0f};
-  float bpm = 3*120.0f;
+  std::array<float, 6> freqs = {220.0f,  261.63f, 293.66f,
+                                329.63f, 392.0f,  440.0f};
+  float bpm = 3 * 120.0f;
   float beat_period = 90.0f / bpm;
   float beat_phase = std::fmod(t, beat_period);
-  float envelope = std::sin(M_PI * beat_phase / beat_period);  
+  float envelope = std::sin(M_PI * beat_phase / beat_period);
   static float last_switch = -1000.0f;
   static int base_idx = 0;
   static float phases[4] = {};
@@ -616,11 +670,10 @@ float custom_track_1(float t) {
     base_idx = rand() % (freqs.size() - 4);
     for (int i = 0; i < 4; ++i) {
       phases[i] = ((float)rand() / (float)RAND_MAX) * 2.0f * M_PI;
-      amps[i] = 0.8f + ((float)rand() / (float)RAND_MAX) * 0.4f;  
+      amps[i] = 0.8f + ((float)rand() / (float)RAND_MAX) * 0.4f;
     }
     last_switch = t;
   }
-
   float sum = 0.0f;
   for (int i = 0; i < 4; ++i) {
     float freq = freqs[base_idx + i];
@@ -630,23 +683,16 @@ float custom_track_1(float t) {
   return envelope * (sum / 4.0f);
 }
 
-float beat(float t) {
-  float beat_freq = 4.0f;
-  float base_freq = 32.0f + 16.0f * std::sin(M_PI * t);
-  return std::cos(2.0f * M_PI * beat_freq * t) *
-         std::sin(2.0f * M_PI * base_freq * t);
-}
-
 float lorenz_track(float t) {
   float freq = music_osc.step();
+  auto beat = [](float t) {
+    float beat_freq = 4.0f;
+    float base_freq = 32.0f + 16.0f * std::sin(M_PI * t);
+    return std::cos(2.0f * M_PI * beat_freq * t) *
+           std::sin(2.0f * M_PI * base_freq * t);
+  };
   return 0.7 * std::sin(2.0f * M_PI * freq * t) + 0.3 * beat(t);
 }
-
-template<typename F>
-float ast_track(float time,F&&f) {
-  return 0.7 * std::sin(2.0f * M_PI *100+f(time,time,time) * time) ;
-}
-
 
 template <typename F, typename... Args>
 Wave generate_music(float duration, BumpAllocator *arena, F &&f,
@@ -678,17 +724,16 @@ Wave generate_music(float duration, BumpAllocator *arena, F &&f,
 NOTES
 + Due to memory pool usage waves do not need to be unloaded
 */
-
 extern "C" {
 int jump_start() {
   // Setttings
-  constexpr int seed = 2*256; // Adam no touch! (0:142)
-  constexpr std::size_t SCENE_MEMORY_POOL =  1024ul * 1024ul;
+  constexpr int seed = 142; // Adam no touch! (0:142) (1:512)
+  constexpr std::size_t SCENE_MEMORY_POOL = 1024ul * 1024ul;
   constexpr std::size_t MUSIC_MEMORY_POOL = 1024ul * 1024ul * 1024ul;
   constexpr int screenWidth = 2 * 72 * 16;
   constexpr int screenHeight = 2 * 72 * 9;
   constexpr float intro_dur = 20.0f;
-  constexpr float demo_dur =  90.0f;
+  constexpr float demo_dur = 90.0f;
   constexpr float outro_dur = 20.0f;
   constexpr int FPS = 60;
   //~Settings
@@ -709,6 +754,7 @@ int jump_start() {
   SetTraceLogLevel(TraceLogLevel::LOG_NONE);
   InitWindow(screenWidth, screenHeight, "");
   SetExitKey(KEY_ESCAPE);
+  SetTargetFPS(FPS);
   InitAudioDevice();
   
         //Setup Scene
@@ -717,7 +763,6 @@ int jump_start() {
        
         //Intro 
         scene.wave = generate_music(intro_dur,&music_arena,lorenz_track);
-        SetTargetFPS(FPS);
         intro(&scene, &scene_arena, intro_dur);
         music_arena.release();
         scene.wave={};
