@@ -5,12 +5,13 @@
 #include <math.h>
 #include <omp.h>
 #include <raylib.h>
+#include <raymath.h>
 #include <stdio.h>
 #include <string>
+#include <sys/cdefs.h>
 #include <sys/types.h>
+#include <array>
 #include <variant>
-
-
 
 class BumpAllocator {
 private:
@@ -72,6 +73,7 @@ struct Scene {
   Image img;
   Texture2D tex;
   float time = {0.0f};
+  Wave wave;
 };
 
 enum class BINOPS : uint8_t { ADD, MUL, N_BINOPS };
@@ -369,18 +371,19 @@ int demo(Scene *sc, BumpAllocator *arena, float dur) {
   auto ast = generate_random_ast_arena(depth, arena);
   auto paint_fn = codegen(ast);
   float actual_time = 0.0;
+  Color *const  colors=((Color*)sc->img.data);
   while (!WindowShouldClose() && actual_time < dur) {
-#pragma omp parallel for collapse(2)
+#pragma omp parallel for
     for (int y = 0; y < screenHeight; ++y) {
+      #pragma omp simd
       for (int x = 0; x < screenWidth; ++x) {
-        const float xx = 2 * (x / (float)screenWidth) - 1.0;
-        const float yy = 2 * (y / (float)screenHeight) - 1.0;
+        const float xx = 2.0f * (x / (float)screenWidth) - 1.0f;
+        const float yy = 2.0f * (y / (float)screenHeight) - 1.0f;
         const auto r =
             wrap(paint_fn(xx, yy, sc->time / 5.0f) + 1.0f, 0.0f, 1.0f);
-        const Color c = {(unsigned char)(r * 255.0f),
-                         (unsigned char)(r * 255.0f),
-                         (unsigned char)(r * 255.0f), 255};
-        ImageDrawPixel(&sc->img, x, y, c);
+        const auto cc=(unsigned char)(r * 255.0f);
+        // ImageDrawPixel(&sc->img, x, y, Color{cc, cc, cc, cc});
+        colors[x + y * screenWidth] = Color{cc, cc, cc, 255};
       }
     }
     if (sc->time > 5) {
@@ -393,7 +396,7 @@ int demo(Scene *sc, BumpAllocator *arena, float dur) {
     actual_time += GetFrameTime();
     UpdateTexture(sc->tex, sc->img.data);
     BeginDrawing();
-    ClearBackground(RAYWHITE);
+    // ClearBackground(RAYWHITE);
     DrawTexture(sc->tex, 0, 0, WHITE);
     DrawFPS(0, 0);
     EndDrawing();
@@ -402,19 +405,60 @@ int demo(Scene *sc, BumpAllocator *arena, float dur) {
 }
 
 const char *intro_texts(float t) {
-  if (t < 2.0) {
+  if (t < 4.0) {
     return "Graffathon 2025!";
   }
-  if (t >= 2.0 && t < 4.0) {
-    return "This is Abstract Math!";
+  if (t >= 4.0 && t < 8.0) {
+    return "Abstract Math!";
   }
-  if (t >= 4.0 && t < 6.0) {
+  if (t >= 8.0 && t < 12.0) {
     return "By GreenHouse!";
   }
-  if (t >= 6.0 && t < 10.0) {
+  if (t >= 12.0 && t < 20.0) {
     return "..in only 22KB!";
   }
   return nullptr;
+}
+
+template <std::floating_point T, typename F>
+static constexpr auto rk4(T yn, T tn, T h, F &&f) -> T {
+  const auto k1 = f(tn, yn);
+  const auto k2 = f(tn + h / T(2.0), yn + h * k1 / T(2.0));
+  const auto k3 = f(tn + h / T(2.0), yn + h * k2 / T(2.0));
+  const auto k4 = f(tn + h, yn + h * k3);
+  const auto yn1 = yn + (h / T(6.0)) * (k1 + T(2.0) * k2 + T(2.0) * k3 + k4);
+  return yn1;
+}
+
+Vector3 getAttractor(Vector3 r0, float dt) {
+  static constexpr float SIGMA = 10.0;
+  static constexpr float BETA = 8.0 / 3.0;
+  static constexpr float RHO = 28.0;
+  Vector3 r1 = r0;
+  float t = 0.0;
+  auto f1 = [&](float t, float x) { (void)t; return SIGMA * (r0.y - x); };
+  auto f2 = [&](float t, float y) { (void)t; return r0.x * (RHO - r0.z) - y; };
+  auto f3 = [&](float t, float z) { (void)t;(void)z; return r0.x * r0.y - BETA * r0.z; };
+  r1.x = rk4(r0.x, t, dt, f1);
+  r1.y = rk4(r0.y, t, dt, f2);
+  r1.z = rk4(r0.z, t, dt, f3);
+  return r1;
+}
+
+Color cmap(float v) {
+  static const Color palette[] = {
+    {0, 0, 128, 255},    // dark blue
+    {0, 128, 255, 255},  // light blue
+    {0, 255, 128, 255},  // greenish
+    {255, 255, 0, 255},  // yellow
+    {255, 128, 0, 255},  // orange
+    {255, 0, 0, 255}     // red
+  };
+  constexpr int num_colors = sizeof(palette) / sizeof(palette[0]);
+
+  int idx = (int)(v * num_colors);
+  if (idx >= num_colors) idx = num_colors - 1;
+  return palette[idx];
 }
 
 void intro(Scene *sc, BumpAllocator *arena, float dur) {
@@ -423,18 +467,38 @@ void intro(Scene *sc, BumpAllocator *arena, float dur) {
   const float W = GetScreenWidth();
   const float H = GetScreenHeight();
   float actual_time = 0.0;
+  Sound snd = LoadSoundFromWave(sc->wave);
+  PlaySound(snd);
+  constexpr float dt = 1.5*1e-2;
+  Vector3 p1{1.0f,0.0f,0.0};
+  Vector3 p2{0.8f,0.0f,0.0};
+  std::size_t point_counter=0;
+  Vector2* points=arena->allocate<Vector2>(1<14);
   while (!WindowShouldClose() && actual_time < dur) {
+    ClearBackground(BLACK);
     auto msg = intro_texts(actual_time);
     if (!msg) {
       return;
     }
     int text_width = MeasureText(msg, 100);
-    BeginDrawing();
-    ClearBackground(BLACK);
-    DrawText(msg, W / 2.0f - 0.5 * text_width, H / 2.0f, 100, ORANGE);
+    BeginDrawing();  
+    auto ps1=Vector3Scale(p1,16.0f);
+    auto ps2=Vector3Scale(p2,16.0f);
+    Vector2 cand1=Vector2{ps1.z + (W/2),ps1.y + (H/2)};
+    Vector2 cand2=Vector2{ps2.z + (W/2),ps2.y + (H/2)};
+    points[++point_counter]=cand1;
+    points[++point_counter]=cand2;
+    for (std::size_t i=0;i<point_counter;++i){
+      DrawCircleV(points[i], 3, i%2==0?RED:RAYWHITE);
+    }
+    p1=getAttractor(p1, dt/1);
+    p2=getAttractor(p2, dt/1);
+    DrawText(msg, W / 4.0f - 0.5 * text_width, H / 2.0f, 100, GOLD);
     actual_time += GetFrameTime();
     EndDrawing();
   }
+  UnloadSound(snd);
+  arena->release();
 }
 
 void outro(Scene *sc, BumpAllocator *arena, float dur) {
@@ -454,26 +518,46 @@ void outro(Scene *sc, BumpAllocator *arena, float dur) {
   }
 }
 
-Wave generate_sine_wave(float frequency, float duration, BumpAllocator *arena) {
-  using music_type_t = int16_t;
+//Singature has to be (float,....)
+float custom_track(float t, const std::array<float,3> &freqs) {
+  float out = 0.0f;
+  for (auto f : freqs) {
+    out += sinf(2.0f * M_PI * f * t);
+  }
+  return out / freqs.size();
+}
+
+template <typename F, typename... Args>
+Wave generate_music(float duration, BumpAllocator *arena, F &&f,
+                    Args &&...args) {
+  using music_type_t = short;
   constexpr std::size_t sampleRate = 48000;
-  const std::size_t sampleCount = (std::size_t)(duration * sampleRate);
+  const std::size_t sampleCount =
+      static_cast<std::size_t>(duration * sampleRate);
   music_type_t *samples = arena->allocate<music_type_t>(sampleCount);
+
   for (std::size_t i = 0; i < sampleCount; i++) {
-    float t = (float)i / (float)sampleRate;
-    samples[i] = (music_type_t)(std::numeric_limits<music_type_t>::max() *
-                                std::sin(2.0f * M_PI * frequency * t));
+    float t = static_cast<float>(i) / sampleRate;
+    float val = f(t, std::forward<Args>(args)...);
+    val = std::clamp(val, -1.0f, 1.0f);
+    samples[i] = static_cast<music_type_t>(val * 32000);
   }
 
   Wave wave = {
-      .frameCount = (unsigned int)sampleCount,
+      .frameCount = static_cast<unsigned int>(sampleCount),
       .sampleRate = sampleRate,
-      .sampleSize = 8 * sizeof(music_type_t),
+      .sampleSize = 16,
       .channels = 1,
       .data = samples,
   };
   return wave;
 }
+
+/*
+NOTES
++ Due to memory pool usage waves do not need to be unloaded
+
+*/
 
 extern "C" {
 int jump_start() {
@@ -481,11 +565,11 @@ int jump_start() {
   constexpr int seed = 142; // Adam no touch!
   constexpr std::size_t SCENE_MEMORY_POOL =  1024ul * 1024ul;
   constexpr std::size_t MUSIC_MEMORY_POOL = 1024ul * 1024ul * 1024ul;
-  constexpr int screenWidth = 1 * 72 * 16;
-  constexpr int screenHeight = 1*72 * 9;
+  constexpr int screenWidth = 2 * 72 * 16;
+  constexpr int screenHeight = 2*72 * 9;
   constexpr int FPS = 60;
-  constexpr float intro_dur = 10.0f;
-  constexpr float demo_dur = 2.0f;
+  constexpr float intro_dur = 2.0f;
+  constexpr float demo_dur = 96.0f;
   constexpr float outro_dur = 4.0f;
   //~Settings
   srand(seed);
@@ -500,23 +584,23 @@ int jump_start() {
   }
   BumpAllocator scene_arena(scene_memory, SCENE_MEMORY_POOL);
   BumpAllocator music_arena(music_memory, MUSIC_MEMORY_POOL);
-  Wave wave = generate_sine_wave(440.f,120.f,&music_arena);
-
-
+  
   // clang-format off
+  SetTraceLogLevel(TraceLogLevel::LOG_NONE);
   InitWindow(screenWidth, screenHeight, "");
+    // SetWindowState(FLAG_WINDOW_RESIZABLE);
+    SetExitKey(KEY_ESCAPE);
+    // ToggleFullscreen();
     InitAudioDevice();
-    Sound snd = LoadSoundFromWave(wave);
-    PlaySound(snd);
-    Scene scene{.img=GenImageColor(screenWidth, screenHeight, BLACK),.tex={}};
+    Scene scene{.img=GenImageColor(screenWidth, screenHeight, BLACK),.tex={},.time=0.0,.wave={}};
     scene.tex = LoadTextureFromImage(scene.img);
+    scene.wave = generate_music(10.f,&music_arena,custom_track,std::array<float,3>{220.0f, 330.0f, 440.0f});
     SetTargetFPS(FPS);
     intro(&scene, &scene_arena, intro_dur);
     demo(&scene, &scene_arena,demo_dur);
     outro(&scene, &scene_arena, outro_dur);
     UnloadImage(scene.img);
     UnloadTexture(scene.tex);
-    UnloadSound(snd);
   CloseWindow();
   // clang-format on
   scene_arena.destroy_with(free);
