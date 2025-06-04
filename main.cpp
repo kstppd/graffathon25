@@ -500,23 +500,23 @@ int jump_start() {
   }
   BumpAllocator scene_arena(scene_memory, SCENE_MEMORY_POOL);
   BumpAllocator music_arena(music_memory, MUSIC_MEMORY_POOL);
+  Wave wave = generate_sine_wave(440.f,120.f,&music_arena);
 
 
   // clang-format off
   InitWindow(screenWidth, screenHeight, "");
     InitAudioDevice();
-    Wave wave = generate_sine_wave(440.f,120.f,&music_arena);
     Sound snd = LoadSoundFromWave(wave);
     PlaySound(snd);
     Scene scene{.img=GenImageColor(screenWidth, screenHeight, BLACK),.tex={}};
     scene.tex = LoadTextureFromImage(scene.img);
-    while(1){}
-    // SetTargetFPS(FPS);
-    // intro(&scene, &scene_arena, intro_dur);
-    // demo(&scene, &scene_arena,demo_dur);
-    // outro(&scene, &scene_arena, outro_dur);
-    // UnloadImage(scene.img);
-    // UnloadTexture(scene.tex);
+    SetTargetFPS(FPS);
+    intro(&scene, &scene_arena, intro_dur);
+    demo(&scene, &scene_arena,demo_dur);
+    outro(&scene, &scene_arena, outro_dur);
+    UnloadImage(scene.img);
+    UnloadTexture(scene.tex);
+    UnloadSound(snd);
   CloseWindow();
   // clang-format on
   scene_arena.destroy_with(free);
