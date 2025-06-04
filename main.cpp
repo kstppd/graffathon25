@@ -13,6 +13,7 @@
 #include <sys/cdefs.h>
 #include <sys/types.h>
 #include <variant>
+#define FONTSIZE 75
 
 class BumpAllocator {
 private:
@@ -426,6 +427,7 @@ int demo(Scene *sc, BumpAllocator *arena, BumpAllocator *music_arena,
   float actual_time = 0.0;
   
   Sound snd = LoadSoundFromWave(sc->wave);
+  // Sound snd = LoadSound(music_file);
   PlaySound(snd);
   Color *const colors = ((Color *)sc->img.data);
   while (!WindowShouldClose() && actual_time < dur) {
@@ -466,17 +468,19 @@ const char *intro_texts(float t) {
     return "Graffathon 2025!";
   }
   if (t >= 4.0 && t < 8.0) {
-    return "Abstract Math!";
+    return "LSD Picasso";
   }
   if (t >= 8.0 && t < 12.0) {
     return "By GreenHouse!";
   }
-  if (t >= 12.0 && t < 20.0) {
-    return "..in only 22KB!";
+  if (t >= 12.0 && t < 16) {
+    return "..in under 27 KB!";
+  }
+  if (t >= 16.0 && t < 20) {
+    return " 27 KB? LMFAO! <3";
   }
   return nullptr;
 }
-
 
 void intro(Scene *sc, BumpAllocator *arena, float dur) {
   (void)arena;
@@ -510,13 +514,33 @@ void intro(Scene *sc, BumpAllocator *arena, float dur) {
     }
     p1 = getAttractor(p1, dt / 1);
     p2 = getAttractor(p2, dt / 1);
-    DrawText(msg, W / 4.0f - 0.5 * text_width, H / 2.0f, 100, GOLD);
+    DrawText(msg, W / 4.0f - 0.5 * text_width, H / 2.0f, FONTSIZE, GOLD);
     actual_time += GetFrameTime();
     EndDrawing();
   }
   UnloadSound(snd);
   arena->release();
 }
+
+// void outro(Scene *sc, BumpAllocator *arena, float dur) {
+//   (void)arena;
+//   (void)sc;
+//   const float W = GetScreenWidth();
+//   const float H = GetScreenHeight();
+//   float actual_time = 0.0;
+//   Sound snd = LoadSoundFromWave(sc->wave);
+//   PlaySound(snd);
+//   const char *msg = "See you next year!";
+//   int text_width = MeasureText(msg, 100);
+//   while (!WindowShouldClose() && actual_time < dur) {
+//     BeginDrawing();
+//     ClearBackground(BLACK);
+//     DrawText(msg, W / 2.0f - 0.5 * text_width, H / 2.0f, FONTSIZE, ORANGE);
+//     actual_time += GetFrameTime();
+//     EndDrawing();
+//   }
+//   UnloadSound(snd);
+// }
 
 void outro(Scene *sc, BumpAllocator *arena, float dur) {
   (void)arena;
@@ -526,17 +550,35 @@ void outro(Scene *sc, BumpAllocator *arena, float dur) {
   float actual_time = 0.0;
   Sound snd = LoadSoundFromWave(sc->wave);
   PlaySound(snd);
+  constexpr float dt = 1.5 * 1e-2;
+  Vector3 p1{1.0f, 0.0f, 0.0};
+  Vector3 p2{0.8f, 0.0f, 0.0};
+  std::size_t point_counter = 0;
+  Vector2 *points = arena->allocate<Vector2>(1 < 14);
   const char *msg = "See you next year!";
-  int text_width = MeasureText(msg, 100);
   while (!WindowShouldClose() && actual_time < dur) {
-    BeginDrawing();
     ClearBackground(BLACK);
-    DrawText(msg, W / 2.0f - 0.5 * text_width, H / 2.0f, 100, ORANGE);
+    int text_width = MeasureText(msg, 100);
+    BeginDrawing();
+    auto ps1 = Vector3Scale(p1, 16.0f);
+    auto ps2 = Vector3Scale(p2, 16.0f);
+    Vector2 cand1 = Vector2{ps1.z + (W / 2), ps1.y + (H / 2)};
+    Vector2 cand2 = Vector2{ps2.z + (W / 2), ps2.y + (H / 2)};
+    points[++point_counter] = cand1;
+    points[++point_counter] = cand2;
+    for (std::size_t i = 0; i < point_counter; ++i) {
+      DrawCircleV(points[i], 3, i % 2 == 0 ? RED : RAYWHITE);
+    }
+    p1 = getAttractor(p1, dt / 1);
+    p2 = getAttractor(p2, dt / 1);
+    DrawText(msg, W / 4.0f - 0.5 * text_width, H / 2.0f, FONTSIZE, GOLD);
     actual_time += GetFrameTime();
     EndDrawing();
   }
   UnloadSound(snd);
+  arena->release();
 }
+
 
 
 // Singature has to be (float,....)
@@ -546,6 +588,46 @@ float custom_track_0(float t, const std::array<float, 3> &freqs) {
     out += sinf(2.0f * M_PI * f * t);
   }
   return out / freqs.size();
+}
+
+float custom_track_1(float t) {
+  constexpr std::array<float, 100> freqs = {
+      207.0f, 206.5f, 207.5f, 555.0f, 556.5f, 554.0f, 206.0f, 552.5f, 208.0f,
+      551.0f, 209.0f, 549.5f, 209.5f, 550.5f, 548.5f, 210.0f, 210.5f, 547.5f,
+      211.0f, 546.5f, 212.0f, 211.5f, 545.0f, 212.5f, 213.0f, 213.5f, 544.0f,
+      543.0f, 214.0f, 542.0f, 215.0f, 214.5f, 541.0f, 540.0f, 215.5f, 539.0f,
+      538.0f, 216.0f, 537.0f, 216.5f, 536.0f, 217.0f, 217.5f, 218.0f, 218.5f,
+      535.0f, 534.0f, 533.0f, 219.0f, 219.5f, 220.0f, 532.0f, 220.5f, 531.0f,
+      221.0f, 530.0f, 222.0f, 229.0f, 228.0f, 534.5f, 533.5f, 224.0f, 225.0f,
+      226.0f, 535.5f, 536.5f, 223.0f, 537.5f, 538.5f, 227.0f, 539.5f, 540.5f,
+      230.0f, 231.0f, 541.5f, 542.5f, 232.0f, 233.0f, 234.0f, 543.5f, 544.5f,
+      545.5f, 235.0f, 236.0f, 237.0f, 546.0f, 547.0f, 548.0f, 238.0f, 239.0f,
+      549.0f, 550.0f, 240.0f, 241.0f, 551.5f, 552.0f, 242.0f, 553.0f, 553.5f,
+      243.0f};
+  float bpm = 3*120.0f;
+  float beat_period = 90.0f / bpm;
+  float beat_phase = std::fmod(t, beat_period);
+  float envelope = std::sin(M_PI * beat_phase / beat_period);  
+  static float last_switch = -1000.0f;
+  static int base_idx = 0;
+  static float phases[4] = {};
+  static float amps[4] = {};
+  if (t - last_switch > 2.0f) {
+    base_idx = rand() % (freqs.size() - 4);
+    for (int i = 0; i < 4; ++i) {
+      phases[i] = ((float)rand() / (float)RAND_MAX) * 2.0f * M_PI;
+      amps[i] = 0.8f + ((float)rand() / (float)RAND_MAX) * 0.4f;  
+    }
+    last_switch = t;
+  }
+
+  float sum = 0.0f;
+  for (int i = 0; i < 4; ++i) {
+    float freq = freqs[base_idx + i];
+    sum += amps[i] * std::sin(2.0f * M_PI * freq * t + phases[i]);
+  }
+
+  return envelope * (sum / 4.0f);
 }
 
 float beat(float t) {
@@ -600,15 +682,15 @@ NOTES
 extern "C" {
 int jump_start() {
   // Setttings
-  constexpr int seed = 1444; // Adam no touch! (0:142)
+  constexpr int seed = 2*256; // Adam no touch! (0:142)
   constexpr std::size_t SCENE_MEMORY_POOL =  1024ul * 1024ul;
   constexpr std::size_t MUSIC_MEMORY_POOL = 1024ul * 1024ul * 1024ul;
   constexpr int screenWidth = 2 * 72 * 16;
   constexpr int screenHeight = 2 * 72 * 9;
-  constexpr int FPS = 60;
   constexpr float intro_dur = 20.0f;
-  constexpr float demo_dur = 96.0f;
-  constexpr float outro_dur = 4.0f;
+  constexpr float demo_dur =  90.0f;
+  constexpr float outro_dur = 20.0f;
+  constexpr int FPS = 60;
   //~Settings
   srand(seed);
 
@@ -628,6 +710,7 @@ int jump_start() {
   InitWindow(screenWidth, screenHeight, "");
   SetExitKey(KEY_ESCAPE);
   InitAudioDevice();
+  
         //Setup Scene
         Scene scene{.img=GenImageColor(screenWidth, screenHeight, BLACK),.tex={},.time=0.0,.wave={}};
         scene.tex = LoadTextureFromImage(scene.img);
@@ -635,12 +718,12 @@ int jump_start() {
         //Intro 
         scene.wave = generate_music(intro_dur,&music_arena,lorenz_track);
         SetTargetFPS(FPS);
-        intro(&scene, &scene_arena, 1);
+        intro(&scene, &scene_arena, intro_dur);
         music_arena.release();
         scene.wave={};
 
         // Main demo with AST
-        scene.wave = generate_music(demo_dur,&music_arena,lorenz_track);
+        scene.wave = generate_music(demo_dur,&music_arena,custom_track_1);
         demo(&scene, &scene_arena,&music_arena,demo_dur);
         music_arena.release();
 
@@ -648,6 +731,7 @@ int jump_start() {
         scene.wave = generate_music(outro_dur,&music_arena,lorenz_track);
         outro(&scene, &scene_arena, outro_dur);
         music_arena.release();
+        
   UnloadImage(scene.img);
   UnloadTexture(scene.tex);
   CloseWindow();
