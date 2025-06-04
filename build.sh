@@ -7,11 +7,10 @@ CXX_FLAGS="-s -no-pie  -fno-use-cxa-atexit  -fdata-sections -ffunction-sections 
 git clone ${RAYLIB_GIT} --depth=1 -b master
 cd raylib/src
 make PLATFORM=PLATFORM_DESKTOP RAYLIB_LIBTYPE=SHARED -j 12
+clear
 cd ${BASE}
 
 g++ -c  main.cpp ${INC_FLAGS} ${CXX_FLAGS}
 nasm -f elf64 start.asm 
 g++ start.o  main.o   ${LD_FLAGS}  -lraylib -o demo
 rm start.o main.o
-ls -al demo
-ldd demo

@@ -753,6 +753,7 @@ int jump_start() {
   // clang-format off
   SetTraceLogLevel(TraceLogLevel::LOG_NONE);
   InitWindow(screenWidth, screenHeight, "");
+  DisableCursor();
   SetExitKey(KEY_ESCAPE);
   SetTargetFPS(FPS);
   InitAudioDevice();
