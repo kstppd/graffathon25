@@ -1,6 +1,7 @@
 #include <cstdint>
 #include <cstring>
 #include <dlfcn.h>
+#include <limits>
 #include <math.h>
 #include <omp.h>
 #include <raylib.h>
@@ -453,12 +454,34 @@ void outro(Scene *sc, BumpAllocator *arena, float dur) {
   }
 }
 
+Wave generate_sine_wave(float frequency, float duration, BumpAllocator *arena) {
+  using music_type_t = int16_t;
+  constexpr std::size_t sampleRate = 48000;
+  const std::size_t sampleCount = (std::size_t)(duration * sampleRate);
+  music_type_t *samples = arena->allocate<music_type_t>(sampleCount);
+  for (std::size_t i = 0; i < sampleCount; i++) {
+    float t = (float)i / (float)sampleRate;
+    samples[i] = (music_type_t)(std::numeric_limits<music_type_t>::max() *
+                                std::sin(2.0f * M_PI * frequency * t));
+  }
+
+  Wave wave = {
+      .frameCount = (unsigned int)sampleCount,
+      .sampleRate = sampleRate,
+      .sampleSize = 8 * sizeof(music_type_t),
+      .channels = 1,
+      .data = samples,
+  };
+  return wave;
+}
+
 extern "C" {
 int jump_start() {
   // Setttings
   constexpr int seed = 142; // Adam no touch!
-  constexpr std::size_t MEMORY_POOL = 4ul * 1024ul * 1024ul;
-  constexpr int screenWidth = 1*72 * 16;
+  constexpr std::size_t SCENE_MEMORY_POOL =  1024ul * 1024ul;
+  constexpr std::size_t MUSIC_MEMORY_POOL = 1024ul * 1024ul * 1024ul;
+  constexpr int screenWidth = 1 * 72 * 16;
   constexpr int screenHeight = 1*72 * 9;
   constexpr int FPS = 60;
   constexpr float intro_dur = 10.0f;
@@ -468,28 +491,36 @@ int jump_start() {
   srand(seed);
 
   // Pool
-  void *memory = malloc(MEMORY_POOL);
-  if (!memory) {
+  void *scene_memory = malloc(SCENE_MEMORY_POOL);
+  void *music_memory = malloc(MUSIC_MEMORY_POOL);
+  if (!scene_memory || !music_memory) {
     fprintf(stderr,
             "ERROR: Could not allocate any memory for the damn pool!\n");
     return 1;
   }
-  BumpAllocator arena(memory, MEMORY_POOL);
+  BumpAllocator scene_arena(scene_memory, SCENE_MEMORY_POOL);
+  BumpAllocator music_arena(music_memory, MUSIC_MEMORY_POOL);
+
 
   // clang-format off
   InitWindow(screenWidth, screenHeight, "");
-    SetTraceLogLevel(TraceLogLevel::LOG_NONE);
+    InitAudioDevice();
+    Wave wave = generate_sine_wave(440.f,120.f,&music_arena);
+    Sound snd = LoadSoundFromWave(wave);
+    PlaySound(snd);
     Scene scene{.img=GenImageColor(screenWidth, screenHeight, BLACK),.tex={}};
     scene.tex = LoadTextureFromImage(scene.img);
-    SetTargetFPS(FPS);
-    intro(&scene, &arena, intro_dur);
-    demo(&scene, &arena,demo_dur);
-    outro(&scene, &arena, outro_dur);
-    UnloadImage(scene.img);
-    UnloadTexture(scene.tex);
+    while(1){}
+    // SetTargetFPS(FPS);
+    // intro(&scene, &scene_arena, intro_dur);
+    // demo(&scene, &scene_arena,demo_dur);
+    // outro(&scene, &scene_arena, outro_dur);
+    // UnloadImage(scene.img);
+    // UnloadTexture(scene.tex);
   CloseWindow();
   // clang-format on
-  arena.destroy_with(free);
+  scene_arena.destroy_with(free);
+  music_arena.destroy_with(free);
   return 0;
 }
 }
