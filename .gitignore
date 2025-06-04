@@ -1,0 +1,9 @@
+raylib/
+.code.c
+.gen*so
+compile_commands.json
+demo
+start.o
+main.o
+.cache
+bk/
