@@ -568,7 +568,7 @@ int jump_start() {
   constexpr int screenWidth = 2 * 72 * 16;
   constexpr int screenHeight = 2*72 * 9;
   constexpr int FPS = 60;
-  constexpr float intro_dur = 2.0f;
+  constexpr float intro_dur = 20.0f;
   constexpr float demo_dur = 96.0f;
   constexpr float outro_dur = 4.0f;
   //~Settings
