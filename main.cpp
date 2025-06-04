@@ -1,6 +1,8 @@
+#include <array>
 #include <cstdint>
 #include <cstring>
 #include <dlfcn.h>
+#include <iostream>
 #include <limits>
 #include <math.h>
 #include <omp.h>
@@ -10,7 +12,6 @@
 #include <string>
 #include <sys/cdefs.h>
 #include <sys/types.h>
-#include <array>
 #include <variant>
 
 class BumpAllocator {
@@ -363,7 +364,59 @@ float wrap(float x, float min, float max) {
   return min + std::fmod((x - min + range), range);
 }
 
-int demo(Scene *sc, BumpAllocator *arena, float dur) {
+template <std::floating_point T, typename F>
+static constexpr auto rk4(T yn, T tn, T h, F &&f) -> T {
+  const auto k1 = f(tn, yn);
+  const auto k2 = f(tn + h / T(2.0), yn + h * k1 / T(2.0));
+  const auto k3 = f(tn + h / T(2.0), yn + h * k2 / T(2.0));
+  const auto k4 = f(tn + h, yn + h * k3);
+  const auto yn1 = yn + (h / T(6.0)) * (k1 + T(2.0) * k2 + T(2.0) * k3 + k4);
+  return yn1;
+}
+
+Vector3 getAttractor(Vector3 r0, float dt) {
+  static constexpr float SIGMA = 10.0;
+  static constexpr float BETA = 8.0 / 3.0;
+  static constexpr float RHO = 28.0;
+  Vector3 r1 = r0;
+  float t = 0.0;
+  auto f1 = [&](float t, float x) {
+    (void)t;
+    return SIGMA * (r0.y - x);
+  };
+  auto f2 = [&](float t, float y) {
+    (void)t;
+    return r0.x * (RHO - r0.z) - y;
+  };
+  auto f3 = [&](float t, float z) {
+    (void)t;
+    (void)z;
+    return r0.x * r0.y - BETA * r0.z;
+  };
+  r1.x = rk4(r0.x, t, dt, f1);
+  r1.y = rk4(r0.y, t, dt, f2);
+  r1.z = rk4(r0.z, t, dt, f3);
+  return r1;
+}
+
+struct MusicLorentzOscillator {
+  Vector3 pos = {2.0f, 0.0f, 0.0f};
+  float dt = 1e-5;
+  float step() {
+    pos = getAttractor(pos, dt);
+    return Vector3Length(pos);
+  }
+  
+  Vector3 stepv() {
+    pos = getAttractor(pos, dt);
+    return pos;
+  }
+};
+MusicLorentzOscillator music_osc{};
+
+int demo(Scene *sc, BumpAllocator *arena, BumpAllocator *music_arena,
+         float dur) {
+  (void)music_arena;
   const int screenWidth = GetScreenWidth();
   const int screenHeight = GetScreenHeight();
   constexpr int depth = 8;
@@ -371,17 +424,20 @@ int demo(Scene *sc, BumpAllocator *arena, float dur) {
   auto ast = generate_random_ast_arena(depth, arena);
   auto paint_fn = codegen(ast);
   float actual_time = 0.0;
-  Color *const  colors=((Color*)sc->img.data);
+  
+  Sound snd = LoadSoundFromWave(sc->wave);
+  PlaySound(snd);
+  Color *const colors = ((Color *)sc->img.data);
   while (!WindowShouldClose() && actual_time < dur) {
 #pragma omp parallel for
     for (int y = 0; y < screenHeight; ++y) {
-      #pragma omp simd
+#pragma omp simd
       for (int x = 0; x < screenWidth; ++x) {
         const float xx = 2.0f * (x / (float)screenWidth) - 1.0f;
         const float yy = 2.0f * (y / (float)screenHeight) - 1.0f;
         const auto r =
             wrap(paint_fn(xx, yy, sc->time / 5.0f) + 1.0f, 0.0f, 1.0f);
-        const auto cc=(unsigned char)(r * 255.0f);
+        const auto cc = (unsigned char)(r * 255.0f);
         // ImageDrawPixel(&sc->img, x, y, Color{cc, cc, cc, cc});
         colors[x + y * screenWidth] = Color{cc, cc, cc, 255};
       }
@@ -401,6 +457,7 @@ int demo(Scene *sc, BumpAllocator *arena, float dur) {
     DrawFPS(0, 0);
     EndDrawing();
   }
+  UnloadSound(snd);
   return 0;
 }
 
@@ -420,46 +477,6 @@ const char *intro_texts(float t) {
   return nullptr;
 }
 
-template <std::floating_point T, typename F>
-static constexpr auto rk4(T yn, T tn, T h, F &&f) -> T {
-  const auto k1 = f(tn, yn);
-  const auto k2 = f(tn + h / T(2.0), yn + h * k1 / T(2.0));
-  const auto k3 = f(tn + h / T(2.0), yn + h * k2 / T(2.0));
-  const auto k4 = f(tn + h, yn + h * k3);
-  const auto yn1 = yn + (h / T(6.0)) * (k1 + T(2.0) * k2 + T(2.0) * k3 + k4);
-  return yn1;
-}
-
-Vector3 getAttractor(Vector3 r0, float dt) {
-  static constexpr float SIGMA = 10.0;
-  static constexpr float BETA = 8.0 / 3.0;
-  static constexpr float RHO = 28.0;
-  Vector3 r1 = r0;
-  float t = 0.0;
-  auto f1 = [&](float t, float x) { (void)t; return SIGMA * (r0.y - x); };
-  auto f2 = [&](float t, float y) { (void)t; return r0.x * (RHO - r0.z) - y; };
-  auto f3 = [&](float t, float z) { (void)t;(void)z; return r0.x * r0.y - BETA * r0.z; };
-  r1.x = rk4(r0.x, t, dt, f1);
-  r1.y = rk4(r0.y, t, dt, f2);
-  r1.z = rk4(r0.z, t, dt, f3);
-  return r1;
-}
-
-Color cmap(float v) {
-  static const Color palette[] = {
-    {0, 0, 128, 255},    // dark blue
-    {0, 128, 255, 255},  // light blue
-    {0, 255, 128, 255},  // greenish
-    {255, 255, 0, 255},  // yellow
-    {255, 128, 0, 255},  // orange
-    {255, 0, 0, 255}     // red
-  };
-  constexpr int num_colors = sizeof(palette) / sizeof(palette[0]);
-
-  int idx = (int)(v * num_colors);
-  if (idx >= num_colors) idx = num_colors - 1;
-  return palette[idx];
-}
 
 void intro(Scene *sc, BumpAllocator *arena, float dur) {
   (void)arena;
@@ -469,11 +486,11 @@ void intro(Scene *sc, BumpAllocator *arena, float dur) {
   float actual_time = 0.0;
   Sound snd = LoadSoundFromWave(sc->wave);
   PlaySound(snd);
-  constexpr float dt = 1.5*1e-2;
-  Vector3 p1{1.0f,0.0f,0.0};
-  Vector3 p2{0.8f,0.0f,0.0};
-  std::size_t point_counter=0;
-  Vector2* points=arena->allocate<Vector2>(1<14);
+  constexpr float dt = 1.5 * 1e-2;
+  Vector3 p1{1.0f, 0.0f, 0.0};
+  Vector3 p2{0.8f, 0.0f, 0.0};
+  std::size_t point_counter = 0;
+  Vector2 *points = arena->allocate<Vector2>(1 < 14);
   while (!WindowShouldClose() && actual_time < dur) {
     ClearBackground(BLACK);
     auto msg = intro_texts(actual_time);
@@ -481,18 +498,18 @@ void intro(Scene *sc, BumpAllocator *arena, float dur) {
       return;
     }
     int text_width = MeasureText(msg, 100);
-    BeginDrawing();  
-    auto ps1=Vector3Scale(p1,16.0f);
-    auto ps2=Vector3Scale(p2,16.0f);
-    Vector2 cand1=Vector2{ps1.z + (W/2),ps1.y + (H/2)};
-    Vector2 cand2=Vector2{ps2.z + (W/2),ps2.y + (H/2)};
-    points[++point_counter]=cand1;
-    points[++point_counter]=cand2;
-    for (std::size_t i=0;i<point_counter;++i){
-      DrawCircleV(points[i], 3, i%2==0?RED:RAYWHITE);
+    BeginDrawing();
+    auto ps1 = Vector3Scale(p1, 16.0f);
+    auto ps2 = Vector3Scale(p2, 16.0f);
+    Vector2 cand1 = Vector2{ps1.z + (W / 2), ps1.y + (H / 2)};
+    Vector2 cand2 = Vector2{ps2.z + (W / 2), ps2.y + (H / 2)};
+    points[++point_counter] = cand1;
+    points[++point_counter] = cand2;
+    for (std::size_t i = 0; i < point_counter; ++i) {
+      DrawCircleV(points[i], 3, i % 2 == 0 ? RED : RAYWHITE);
     }
-    p1=getAttractor(p1, dt/1);
-    p2=getAttractor(p2, dt/1);
+    p1 = getAttractor(p1, dt / 1);
+    p2 = getAttractor(p2, dt / 1);
     DrawText(msg, W / 4.0f - 0.5 * text_width, H / 2.0f, 100, GOLD);
     actual_time += GetFrameTime();
     EndDrawing();
@@ -507,7 +524,9 @@ void outro(Scene *sc, BumpAllocator *arena, float dur) {
   const float W = GetScreenWidth();
   const float H = GetScreenHeight();
   float actual_time = 0.0;
-  const char* msg = "See you next year!";
+  Sound snd = LoadSoundFromWave(sc->wave);
+  PlaySound(snd);
+  const char *msg = "See you next year!";
   int text_width = MeasureText(msg, 100);
   while (!WindowShouldClose() && actual_time < dur) {
     BeginDrawing();
@@ -516,16 +535,36 @@ void outro(Scene *sc, BumpAllocator *arena, float dur) {
     actual_time += GetFrameTime();
     EndDrawing();
   }
+  UnloadSound(snd);
 }
 
-//Singature has to be (float,....)
-float custom_track(float t, const std::array<float,3> &freqs) {
+
+// Singature has to be (float,....)
+float custom_track_0(float t, const std::array<float, 3> &freqs) {
   float out = 0.0f;
   for (auto f : freqs) {
     out += sinf(2.0f * M_PI * f * t);
   }
   return out / freqs.size();
 }
+
+float beat(float t) {
+  float beat_freq = 4.0f;
+  float base_freq = 32.0f + 16.0f * std::sin(M_PI * t);
+  return std::cos(2.0f * M_PI * beat_freq * t) *
+         std::sin(2.0f * M_PI * base_freq * t);
+}
+
+float lorenz_track(float t) {
+  float freq = music_osc.step();
+  return 0.7 * std::sin(2.0f * M_PI * freq * t) + 0.3 * beat(t);
+}
+
+template<typename F>
+float ast_track(float time,F&&f) {
+  return 0.7 * std::sin(2.0f * M_PI *100+f(time,time,time) * time) ;
+}
+
 
 template <typename F, typename... Args>
 Wave generate_music(float duration, BumpAllocator *arena, F &&f,
@@ -540,7 +579,7 @@ Wave generate_music(float duration, BumpAllocator *arena, F &&f,
     float t = static_cast<float>(i) / sampleRate;
     float val = f(t, std::forward<Args>(args)...);
     val = std::clamp(val, -1.0f, 1.0f);
-    samples[i] = static_cast<music_type_t>(val * 32000);
+    samples[i] = static_cast<music_type_t>(val * 31000);
   }
 
   Wave wave = {
@@ -556,17 +595,16 @@ Wave generate_music(float duration, BumpAllocator *arena, F &&f,
 /*
 NOTES
 + Due to memory pool usage waves do not need to be unloaded
-
 */
 
 extern "C" {
 int jump_start() {
   // Setttings
-  constexpr int seed = 142; // Adam no touch!
+  constexpr int seed = 1444; // Adam no touch! (0:142)
   constexpr std::size_t SCENE_MEMORY_POOL =  1024ul * 1024ul;
   constexpr std::size_t MUSIC_MEMORY_POOL = 1024ul * 1024ul * 1024ul;
   constexpr int screenWidth = 2 * 72 * 16;
-  constexpr int screenHeight = 2*72 * 9;
+  constexpr int screenHeight = 2 * 72 * 9;
   constexpr int FPS = 60;
   constexpr float intro_dur = 20.0f;
   constexpr float demo_dur = 96.0f;
@@ -584,23 +622,34 @@ int jump_start() {
   }
   BumpAllocator scene_arena(scene_memory, SCENE_MEMORY_POOL);
   BumpAllocator music_arena(music_memory, MUSIC_MEMORY_POOL);
-  
+
   // clang-format off
   SetTraceLogLevel(TraceLogLevel::LOG_NONE);
   InitWindow(screenWidth, screenHeight, "");
-    // SetWindowState(FLAG_WINDOW_RESIZABLE);
-    SetExitKey(KEY_ESCAPE);
-    // ToggleFullscreen();
-    InitAudioDevice();
-    Scene scene{.img=GenImageColor(screenWidth, screenHeight, BLACK),.tex={},.time=0.0,.wave={}};
-    scene.tex = LoadTextureFromImage(scene.img);
-    scene.wave = generate_music(10.f,&music_arena,custom_track,std::array<float,3>{220.0f, 330.0f, 440.0f});
-    SetTargetFPS(FPS);
-    intro(&scene, &scene_arena, intro_dur);
-    demo(&scene, &scene_arena,demo_dur);
-    outro(&scene, &scene_arena, outro_dur);
-    UnloadImage(scene.img);
-    UnloadTexture(scene.tex);
+  SetExitKey(KEY_ESCAPE);
+  InitAudioDevice();
+        //Setup Scene
+        Scene scene{.img=GenImageColor(screenWidth, screenHeight, BLACK),.tex={},.time=0.0,.wave={}};
+        scene.tex = LoadTextureFromImage(scene.img);
+       
+        //Intro 
+        scene.wave = generate_music(intro_dur,&music_arena,lorenz_track);
+        SetTargetFPS(FPS);
+        intro(&scene, &scene_arena, 1);
+        music_arena.release();
+        scene.wave={};
+
+        // Main demo with AST
+        scene.wave = generate_music(demo_dur,&music_arena,lorenz_track);
+        demo(&scene, &scene_arena,&music_arena,demo_dur);
+        music_arena.release();
+
+        //Outro
+        scene.wave = generate_music(outro_dur,&music_arena,lorenz_track);
+        outro(&scene, &scene_arena, outro_dur);
+        music_arena.release();
+  UnloadImage(scene.img);
+  UnloadTexture(scene.tex);
   CloseWindow();
   // clang-format on
   scene_arena.destroy_with(free);
