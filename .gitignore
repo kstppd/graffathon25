@@ -7,3 +7,4 @@ start.o
 main.o
 .cache
 bk/
+*mp4
