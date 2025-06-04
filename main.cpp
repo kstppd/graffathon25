@@ -456,14 +456,15 @@ void outro(Scene *sc, BumpAllocator *arena, float dur) {
 extern "C" {
 int jump_start() {
   // Setttings
-  constexpr std::size_t MEMORY_POOL = 4ul * 1024ul * 1024ul;
   constexpr int seed = 142; // Adam no touch!
+  constexpr std::size_t MEMORY_POOL = 4ul * 1024ul * 1024ul;
   constexpr int screenWidth = 1*72 * 16;
   constexpr int screenHeight = 1*72 * 9;
   constexpr int FPS = 60;
   constexpr float intro_dur = 10.0f;
   constexpr float demo_dur = 2.0f;
   constexpr float outro_dur = 4.0f;
+  //~Settings
   srand(seed);
 
   // Pool
@@ -488,9 +489,7 @@ int jump_start() {
     UnloadTexture(scene.tex);
   CloseWindow();
   // clang-format on
-  if (memory) {
-    free(memory);
-  }
+  arena.destroy_with(free);
   return 0;
 }
 }
