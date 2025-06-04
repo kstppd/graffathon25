@@ -474,7 +474,7 @@ const char *intro_texts(float t) {
     return "By GreenHouse!";
   }
   if (t >= 12.0 && t < 16) {
-    return "..in under 27 KB!";
+    return "..in under 31 KB!";
   }
   if (t >= 16.0 && t < 20) {
     return " 27 KB? LMFAO! <3";
