@@ -9,6 +9,8 @@
 #include <sys/types.h>
 #include <variant>
 
+
+
 class BumpAllocator {
 private:
   void *_memory = nullptr;
@@ -65,6 +67,12 @@ public:
   template <typename F> void destroy_with(F &&f) { f(_memory); }
 };
 
+struct Scene {
+  Image img;
+  Texture2D tex;
+  float time = {0.0f};
+};
+
 enum class BINOPS : uint8_t { ADD, MUL, N_BINOPS };
 
 enum class UNOPS : uint8_t { SIN, COS, SQRT, POW2, N_UNOPS };
@@ -107,6 +115,7 @@ enum class AST_NODE_TYPE : u_int8_t {
   AST_NODE_UNARY
 };
 
+// Fwd declare these guys
 struct NodeBinary;
 struct NodeUnary;
 struct NodeNumber;
@@ -351,57 +360,110 @@ float wrap(float x, float min, float max) {
   return min + std::fmod((x - min + range), range);
 }
 
-int demo(int screenWidth, int screenHeight, float &time, BumpAllocator *arena) {
-  Image img = GenImageColor(screenWidth, screenHeight, BLACK);
-  Texture2D texture = LoadTextureFromImage(img);
+int demo(Scene *sc, BumpAllocator *arena, float dur) {
+  const int screenWidth = GetScreenWidth();
+  const int screenHeight = GetScreenHeight();
   constexpr int depth = 8;
   arena->release();
   auto ast = generate_random_ast_arena(depth, arena);
   auto paint_fn = codegen(ast);
-  while (!WindowShouldClose()) {
+  float actual_time = 0.0;
+  while (!WindowShouldClose() && actual_time < dur) {
 #pragma omp parallel for collapse(2)
     for (int y = 0; y < screenHeight; ++y) {
       for (int x = 0; x < screenWidth; ++x) {
         const float xx = 2 * (x / (float)screenWidth) - 1.0;
         const float yy = 2 * (y / (float)screenHeight) - 1.0;
-        const auto r = wrap(paint_fn(xx, yy, time / 5.0f) + 1.0f, 0.0f, 1.0f);
+        const auto r =
+            wrap(paint_fn(xx, yy, sc->time / 5.0f) + 1.0f, 0.0f, 1.0f);
         const Color c = {(unsigned char)(r * 255.0f),
                          (unsigned char)(r * 255.0f),
                          (unsigned char)(r * 255.0f), 255};
-        ImageDrawPixel(&img, x, y, c);
+        ImageDrawPixel(&sc->img, x, y, c);
       }
     }
-    if (time > 5) {
-      time = 0.0;
+    if (sc->time > 5) {
+      sc->time = 0.0;
       arena->release();
       ast = generate_random_ast_arena(depth, arena);
       paint_fn = codegen(ast);
     }
-    time += GetFrameTime() / 2;
-    UpdateTexture(texture, img.data);
+    sc->time += GetFrameTime() / 2;
+    actual_time += GetFrameTime();
+    UpdateTexture(sc->tex, sc->img.data);
     BeginDrawing();
     ClearBackground(RAYWHITE);
-    DrawTexture(texture, 0, 0, WHITE);
+    DrawTexture(sc->tex, 0, 0, WHITE);
     DrawFPS(0, 0);
     EndDrawing();
   }
-  UnloadImage(img);
-  UnloadTexture(texture);
   return 0;
 }
 
-void intro() {}
-void outro() {}
+const char *intro_texts(float t) {
+  if (t < 2.0) {
+    return "Graffathon 2025!";
+  }
+  if (t >= 2.0 && t < 4.0) {
+    return "This is Abstract Math!";
+  }
+  if (t >= 4.0 && t < 6.0) {
+    return "By GreenHouse!";
+  }
+  if (t >= 6.0 && t < 10.0) {
+    return "..in only 22KB!";
+  }
+  return nullptr;
+}
+
+void intro(Scene *sc, BumpAllocator *arena, float dur) {
+  (void)arena;
+  (void)sc;
+  const float W = GetScreenWidth();
+  const float H = GetScreenHeight();
+  float actual_time = 0.0;
+  while (!WindowShouldClose() && actual_time < dur) {
+    auto msg = intro_texts(actual_time);
+    if (!msg) {
+      return;
+    }
+    int text_width = MeasureText(msg, 100);
+    BeginDrawing();
+    ClearBackground(BLACK);
+    DrawText(msg, W / 2.0f - 0.5 * text_width, H / 2.0f, 100, ORANGE);
+    actual_time += GetFrameTime();
+    EndDrawing();
+  }
+}
+
+void outro(Scene *sc, BumpAllocator *arena, float dur) {
+  (void)arena;
+  (void)sc;
+  const float W = GetScreenWidth();
+  const float H = GetScreenHeight();
+  float actual_time = 0.0;
+  const char* msg = "See you next year!";
+  int text_width = MeasureText(msg, 100);
+  while (!WindowShouldClose() && actual_time < dur) {
+    BeginDrawing();
+    ClearBackground(BLACK);
+    DrawText(msg, W / 2.0f - 0.5 * text_width, H / 2.0f, 100, ORANGE);
+    actual_time += GetFrameTime();
+    EndDrawing();
+  }
+}
 
 extern "C" {
 int jump_start() {
   // Setttings
-  constexpr std::size_t MEMORY_POOL = 4ul*1024ul*1024ul;
-  const int screenWidth = 72 * 16;
-  const int screenHeight = 72 * 9;
+  constexpr std::size_t MEMORY_POOL = 4ul * 1024ul * 1024ul;
+  constexpr int seed = 142; // Adam no touch!
+  constexpr int screenWidth = 1*72 * 16;
+  constexpr int screenHeight = 1*72 * 9;
   constexpr int FPS = 60;
-
-  const int seed = 142;
+  constexpr float intro_dur = 10.0f;
+  constexpr float demo_dur = 2.0f;
+  constexpr float outro_dur = 4.0f;
   srand(seed);
 
   // Pool
@@ -413,14 +475,19 @@ int jump_start() {
   }
   BumpAllocator arena(memory, MEMORY_POOL);
 
-  float time = 0.0f;
-  SetTraceLogLevel(TraceLogLevel::LOG_NONE);
+  // clang-format off
   InitWindow(screenWidth, screenHeight, "");
-  intro();
-  SetTargetFPS(FPS);
-  demo(screenWidth, screenHeight, time, &arena);
-  outro();
+    SetTraceLogLevel(TraceLogLevel::LOG_NONE);
+    Scene scene{.img=GenImageColor(screenWidth, screenHeight, BLACK),.tex={}};
+    scene.tex = LoadTextureFromImage(scene.img);
+    SetTargetFPS(FPS);
+    intro(&scene, &arena, intro_dur);
+    demo(&scene, &arena,demo_dur);
+    outro(&scene, &arena, outro_dur);
+    UnloadImage(scene.img);
+    UnloadTexture(scene.tex);
   CloseWindow();
+  // clang-format on
   if (memory) {
     free(memory);
   }
