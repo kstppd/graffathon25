@@ -2,6 +2,7 @@
 #include <math.h>
 #include <raylib.h>
 #define FONTSIZE 75
+#define AST_INTERVAL 2.0f
 
 inline Vector3 Vector3Scale(Vector3 a, float s) {
   return Vector3{a.x * s, a.y * s, a.z * s};
@@ -230,6 +231,32 @@ static const char *codegen_glsl_sawtooth(const GenericNode &node) {
   return buffer;
 }
 
+static const char *codegen_glsl_sawtooth_grayscale(const GenericNode &node) {
+  static char buffer[65536];
+  char *out = buffer;
+  out += sprintf(out, "#version 330 core\n"
+                      "out vec4 FragColor;\n"
+                      "uniform vec2 resolution;\n"
+                      "uniform float time;\n\n"
+                      "float saw(float x) {\n"
+                      "    return fract(x);\n"
+                      "}\n\n"
+                      "void main() {\n"
+                      "    vec2 uv = gl_FragCoord.xy / resolution;\n"
+                      "    float x = uv.x * 2.0 - 1.0;\n"
+                      "    float y = uv.y * 2.0 - 1.0;\n"
+                      "    float t = time / 5.0;\n"
+                      "    float pulse = 1.0 + 0.5 * sin(6.2831 * t);\n"
+                      "    float base = ");
+  out = write_expr(node, out);
+  out +=
+      sprintf(out, ";\n"
+                   "    float gray = saw(base * 2.0) * pulse;\n"
+                   "    FragColor = vec4(vec3(clamp(gray, 0.0, 1.0)), 1.0);\n"
+                   "}\n");
+  return buffer;
+}
+
 static float rand_float(float min = -1.0f, float max = 1.0f) {
   const float scale = rand() / (float)RAND_MAX;
   return min + scale * (max - min);
@@ -340,19 +367,19 @@ struct MusicLorenzOscillator {
 MusicLorenzOscillator music_osc{};
 
 static const char *intro_texts(float t) {
-  if (t < 4.0) {
+  if (t < 2.0) {
     return "Graffathon 2025!";
   }
-  if (t >= 4.0 && t < 8.0) {
+  if (t >= 2.0 && t < 5.0) {
     return "A.S.T. Picasso";
   }
-  if (t >= 8.0 && t < 12.0) {
+  if (t >= 5.0 && t < 8.0) {
     return "By GreenHouse!";
   }
-  if (t >= 12.0 && t < 16) {
+  if (t >= 8.0 && t < 10) {
     return "..in under 16 KB!";
   }
-  if (t >= 16.0 && t < 20) {
+  if (t >= 10.0 && t < 12) {
     return " 16 KB? LMFAO! <3";
   }
   return nullptr;
@@ -400,15 +427,236 @@ static size_t intro(Scene *sc, BumpAllocator *arena, float dur) {
   return point_counter;
 }
 
+static const char *intro_post1_texts(float t) {
+  if (t < 3.0) {
+    return "Today we produce \n abstract graphics using \n random ASTs.";
+  }
+  if (t >= 3.0 && t < 8.0) {
+    return "An AST is an \n Asbtract Synatx Tree!";
+  }
+  if (t >= 8.0 && t < 12.0) {
+    return "Today each AST node \n is an operator.";
+  }
+  if (t >= 12.0 && t < 15) {
+    return "Our vocabulary for today: ";
+  }
+  if (t >= 15.0 && t < 19) {
+    return "add, mut, mod, exp, sin,\n sqrt, pow";
+  }
+  if (t >= 19.0 && t < 23) {
+    return "Here is an AST: \n\n f=sin(cos(x)+\npow(sqrt(2*x+sin(y)))";
+  }
+  if (t >= 23.0 && t < 26) {
+    return "Let's see what this \nlooks like:";
+  }
+  if (t >= 26.0 && t < 28) {
+    return "All that below 16 KB!\n\nLet's go!";
+  }
+  return nullptr;
+}
+
 static int demo(Scene *sc, BumpAllocator *arena, BumpAllocator *music_arena,
-                float dur) {
+                float dur, int depth = 8);
+
+static void post_intro(Scene *sc, BumpAllocator *arena, float dur) {
+  (void)arena;
+  (void)sc;
+  const float W = GetScreenWidth();
+  const float H = GetScreenHeight();
+  float actual_time = 0.0;
+  Sound snd = LoadSoundFromWave(sc->wave);
+  PlaySound(snd);
+  constexpr float dt = 1 * 1e-2;
+  Vector3 p1{1.3f, 0.0f, 0.0};
+  Vector3 p2{0.4f, 0.0f, 0.0};
+  size_t point_counter = 0;
+  Vector2 *points = arena->allocate<Vector2>(1 < 20);
+  bool flag = true;
+
+  while (!WindowShouldClose() && actual_time < dur) {
+    ClearBackground(BLACK);
+    // Spawn an AST and then revert actual time back
+    if (actual_time > 26 && flag) {
+      float store = actual_time;
+      // Create a Pool from my Pool -> Insane!
+      BumpAllocator tmp1(arena->allocate<float>(1024 * 1024),
+                         1024 * sizeof(float));
+      flag = false;
+      demo(sc, arena, &tmp1, 2, 8);
+      ClearBackground(BLACK);
+      actual_time = store + GetFrameTime();
+      continue;
+    }
+    auto msg = intro_post1_texts(actual_time);
+    if (!msg) {
+      return;
+    }
+    int text_width = MeasureText(msg, 100);
+    BeginDrawing();
+    ClearBackground(BLACK);
+    for (size_t i = 0; i < 16 / 2; ++i) {
+      auto ps1 = Vector3Scale(p1, 20.0f);
+      auto ps2 = Vector3Scale(p2, 20.0f);
+      Vector2 cand1 = Vector2{ps1.z + (W / 2), ps1.x + (H / 2)};
+      Vector2 cand2 = Vector2{ps2.z + (W / 2), ps2.x + (H / 2)};
+      points[point_counter++] = cand1;
+      points[point_counter++] = cand2;
+      p1 = getAttractor(p1, dt / 2);
+      p2 = getAttractor(p2, dt / 2);
+    }
+    for (size_t i = 0; i < point_counter; ++i) {
+      DrawCircleV(points[i], 1, i % 2 == 0 ? GOLD : PINK);
+    }
+
+    if (actual_time > 20.0 && actual_time <= 26) {
+      const float anim_dt = 0.25f;
+      float fontSize = 32;
+      float rootX = 0.25f * W;
+      float rootY = 0.45f * H;
+      DrawEllipse(rootX, rootY, 64, 32, RED);
+      const char *text = "sin";
+      int textWidth = MeasureText(text, fontSize);
+      DrawText(text, rootX - textWidth / 2.0f, rootY - fontSize / 2.0f,
+               fontSize, RAYWHITE);
+      if (actual_time < 19.5)
+        goto checkpoint;
+
+      float plusX = rootX;
+      float plusY = rootY + 96;
+      DrawEllipse(plusX, plusY, 64, 32, ORANGE);
+      text = "+";
+      textWidth = MeasureText(text, fontSize);
+      DrawText(text, plusX - textWidth / 2.0f, plusY - fontSize / 2.0f,
+               fontSize, RAYWHITE);
+      DrawLine(rootX, rootY + 32, plusX, plusY - 32, LIGHTGRAY);
+      if (actual_time < 19.5 + anim_dt)
+        goto checkpoint;
+
+      float cosX = plusX - 160;
+      float cosY = plusY + 96;
+      DrawEllipse(cosX, cosY, 64, 32, GREEN);
+      text = "cos";
+      textWidth = MeasureText(text, fontSize);
+      DrawText(text, cosX - textWidth / 2.0f, cosY - fontSize / 2.0f, fontSize,
+               RAYWHITE);
+      DrawLine(plusX, plusY + 32, cosX, cosY - 32, LIGHTGRAY);
+      if (actual_time < 19.5 + 2 * anim_dt)
+        goto checkpoint;
+
+      float x1X = cosX;
+      float x1Y = cosY + 96;
+      DrawEllipse(x1X, x1Y, 64, 32, DARKGREEN);
+      text = "x";
+      textWidth = MeasureText(text, fontSize);
+      DrawText(text, x1X - textWidth / 2.0f, x1Y - fontSize / 2.0f, fontSize,
+               RAYWHITE);
+      DrawLine(cosX, cosY + 32, x1X, x1Y - 32, LIGHTGRAY);
+      if (actual_time < 19.5 + 3 * anim_dt)
+        goto checkpoint;
+
+      float powX = plusX + 160;
+      float powY = plusY + 96;
+      DrawEllipse(powX, powY, 64, 32, BLUE);
+      text = "pow";
+      textWidth = MeasureText(text, fontSize);
+      DrawText(text, powX - textWidth / 2.0f, powY - fontSize / 2.0f, fontSize,
+               RAYWHITE);
+      DrawLine(plusX, plusY + 32, powX, powY - 32, LIGHTGRAY);
+      if (actual_time < 19.5 + 4 * anim_dt)
+        goto checkpoint;
+
+      float sqrtX = powX;
+      float sqrtY = powY + 96;
+      DrawEllipse(sqrtX, sqrtY, 64, 32, PURPLE);
+      text = "sqrt";
+      textWidth = MeasureText(text, fontSize);
+      DrawText(text, sqrtX - textWidth / 2.0f, sqrtY - fontSize / 2.0f,
+               fontSize, RAYWHITE);
+      DrawLine(powX, powY + 32, sqrtX, sqrtY - 32, LIGHTGRAY);
+      if (actual_time < 19.5 + 5 * anim_dt)
+        goto checkpoint;
+
+      float plus2X = sqrtX;
+      float plus2Y = sqrtY + 96;
+      DrawEllipse(plus2X, plus2Y, 64, 32, ORANGE);
+      text = "+";
+      textWidth = MeasureText(text, fontSize);
+      DrawText(text, plus2X - textWidth / 2.0f, plus2Y - fontSize / 2.0f,
+               fontSize, RAYWHITE);
+      DrawLine(sqrtX, sqrtY + 32, plus2X, plus2Y - 32, LIGHTGRAY);
+      if (actual_time < 19.5 + 6 * anim_dt)
+        goto checkpoint;
+
+      float mulX = plus2X - 120;
+      float mulY = plus2Y + 96;
+      DrawEllipse(mulX, mulY, 64, 32, GRAY);
+      text = "*";
+      textWidth = MeasureText(text, fontSize);
+      DrawText(text, mulX - textWidth / 2.0f, mulY - fontSize / 2.0f, fontSize,
+               RAYWHITE);
+      DrawLine(plus2X, plus2Y + 32, mulX, mulY - 32, LIGHTGRAY);
+      if (actual_time < 19.5 + 7 * anim_dt)
+        goto checkpoint;
+
+      float num2X = mulX - 64;
+      float num2Y = mulY + 96;
+      DrawEllipse(num2X, num2Y, 64, 32, DARKGRAY);
+      text = "2";
+      textWidth = MeasureText(text, fontSize);
+      DrawText(text, num2X - textWidth / 2.0f, num2Y - fontSize / 2.0f,
+               fontSize, RAYWHITE);
+      DrawLine(mulX, mulY + 32, num2X, num2Y - 32, LIGHTGRAY);
+      if (actual_time < 19.5 + 8 * anim_dt)
+        goto checkpoint;
+
+      float x2X = mulX + 64;
+      float x2Y = mulY + 96;
+      DrawEllipse(x2X, x2Y, 64, 32, DARKGREEN);
+      text = "x";
+      textWidth = MeasureText(text, fontSize);
+      DrawText(text, x2X - textWidth / 2.0f, x2Y - fontSize / 2.0f, fontSize,
+               RAYWHITE);
+      DrawLine(mulX, mulY + 32, x2X, x2Y - 32, LIGHTGRAY);
+      if (actual_time < 19.5 + 9 * anim_dt)
+        goto checkpoint;
+
+      float sinY_X = plus2X + 120;
+      float sinY_Y = plus2Y + 96;
+      DrawEllipse(sinY_X, sinY_Y, 64, 32, RED);
+      text = "sin";
+      textWidth = MeasureText(text, fontSize);
+      DrawText(text, sinY_X - textWidth / 2.0f, sinY_Y - fontSize / 2.0f,
+               fontSize, RAYWHITE);
+      DrawLine(plus2X, plus2Y + 32, sinY_X, sinY_Y - 32, LIGHTGRAY);
+      if (actual_time < 19.5 + 10 * anim_dt)
+        goto checkpoint;
+
+      float yX = sinY_X;
+      float yY = sinY_Y + 96;
+      DrawEllipse(yX, yY, 64, 32, DARKGREEN);
+      text = "y";
+      textWidth = MeasureText(text, fontSize);
+      DrawText(text, yX - textWidth / 2.0f, yY - fontSize / 2.0f, fontSize,
+               RAYWHITE);
+      DrawLine(sinY_X, sinY_Y + 32, yX, yY - 32, LIGHTGRAY);
+    }
+  checkpoint:
+    DrawText(msg, W / 4.0f - 0.4 * text_width, 0.175 * H, FONTSIZE, GOLD);
+    actual_time += GetFrameTime();
+    EndDrawing();
+  }
+  UnloadSound(snd);
+  return;
+}
+
+static int demo(Scene *sc, BumpAllocator *arena, BumpAllocator *music_arena,
+                float dur, int depth) {
   (void)music_arena;
   const int screenWidth = GetScreenWidth();
   const int screenHeight = GetScreenHeight();
-  int depth = 8;
   arena->release();
   auto ast = generate_random_ast_arena(depth, arena);
-  auto glsl_str = codegen_glsl_sawtooth(ast);
+  auto glsl_str = codegen_glsl_sawtooth_grayscale(ast);
   float actual_time = 0.0;
 
   Sound snd = LoadSoundFromWave(sc->wave);
@@ -421,12 +669,13 @@ static int demo(Scene *sc, BumpAllocator *arena, BumpAllocator *music_arena,
   float resolution[2] = {(float)screenWidth, (float)screenHeight};
   SetShaderValue(shader, locRes, resolution, SHADER_UNIFORM_VEC2);
   while (!WindowShouldClose() && actual_time < dur) {
-    if (sc->time > 2) {
-      // depth++;
+    if (sc->time > AST_INTERVAL) {
       sc->time = 0.0;
       arena->release();
       ast = generate_random_ast_arena(depth, arena);
-      glsl_str = codegen_glsl_sawtooth(ast);
+      glsl_str = (actual_time >= dur / 2.0f)
+                     ? codegen_glsl_sawtooth(ast)
+                     : codegen_glsl_sawtooth_grayscale(ast);
       UnloadShader(shader);
       shader = LoadShaderFromMemory(0, glsl_str);
       locRes = GetShaderLocation(shader, "resolution");
@@ -505,16 +754,16 @@ static float custom_track_1(float t) {
   return envelope * (sum / 4.0f);
 }
 
-static float lorenz_track(float t) {
-  float freq = music_osc.step();
-  auto beat = [](float t) {
-    float beat_freq = 40.0f;
-    float base_freq = 32.0f + 1.0f * sinf(M_PI * t);
-    return sinf(2.0f * M_PI * beat_freq * t + 90.0f * (M_PI / 180.0f)) *
-           sinf(2.0f * M_PI * base_freq * t);
-  };
-  return 0.7 * sinf(2.0f * M_PI * freq * t) + 0.3 * beat(t);
-}
+// static float lorenz_track(float t) {
+//   float freq = music_osc.step();
+//   auto beat = [](float t) {
+//     float beat_freq = 40.0f;
+//     float base_freq = 32.0f + 1.0f * sinf(M_PI * t);
+//     return sinf(2.0f * M_PI * beat_freq * t + 90.0f * (M_PI / 180.0f)) *
+//            sinf(2.0f * M_PI * base_freq * t);
+//   };
+//   return 0.7 * sinf(2.0f * M_PI * freq * t) + 0.3 * beat(t);
+// }
 
 template <typename T> T static clamp(const T &value, const T min, const T max) {
   if (value < min) {
@@ -558,13 +807,14 @@ NOTES
 extern "C" {
 int jump_start() {
   // Setttings
-  constexpr int seed = 143; // Adam no touch! (0:142) (1:512)
-  constexpr size_t SCENE_MEMORY_POOL = 512 * 1024ul * 1024ul;
+  constexpr int seed = 512; // Adam no touch! (0:142) (1:512)
+  constexpr size_t SCENE_MEMORY_POOL = 1024ul * 1024ul * 1024ul;
   constexpr size_t MUSIC_MEMORY_POOL = 1024ul * 1024ul * 1024ul;
   constexpr int screenWidth = 2 * 72 * 16;
   constexpr int screenHeight = 2 * 72 * 9;
-  constexpr float intro_dur = 20.0f;
-  constexpr float demo_dur = 90.0f;
+  constexpr float intro_dur = 12.0f;
+  constexpr float post_intro_1_dur = 31.0f;
+  constexpr float demo_dur = 60.0f;
   constexpr float outro_dur = intro_dur;
   constexpr int FPS = 60;
   //~Settings
@@ -586,7 +836,7 @@ int jump_start() {
   // clang-format off
   SetTraceLogLevel(TraceLogLevel::LOG_NONE);
   InitWindow(screenWidth, screenHeight, "");
-  // DisableCursor();
+  DisableCursor();
   SetExitKey(KEY_ESCAPE);
   SetTargetFPS(FPS);
   InitAudioDevice();
@@ -596,21 +846,24 @@ int jump_start() {
         scene.tex = LoadTextureFromImage(scene.img);
        
         //Intro 
-        scene.wave = generate_music(intro_dur,&music_arena,lorenz_track);
+        // scene.wave = generate_music(intro_dur,&music_arena,lorenz_track);
         auto n=intro(&scene, &scene_arena, intro_dur);
         memcpy(scratch_memory,scene_memory,n*sizeof(Vector2));
-                               
         scene_arena.release();
         music_arena.release();
-        scene.wave={};
-
+        
+        //Post Intro 1 
+        post_intro(&scene, &scene_arena, post_intro_1_dur);
+        scene_arena.release();
+        music_arena.release();
+                              
         // Main demo with AST
         scene.wave = generate_music(demo_dur,&music_arena,custom_track_1);
         demo(&scene, &scene_arena,&music_arena,demo_dur);
         music_arena.release();
 
         //Outro
-        scene.wave = generate_music(outro_dur,&music_arena,lorenz_track);
+        // scene.wave = generate_music(outro_dur,&music_arena,lorenz_track);
         outro(&scene, &scratch_arena, outro_dur, n);
         music_arena.release();
         
@@ -618,10 +871,18 @@ int jump_start() {
   UnloadTexture(scene.tex);
   CloseWindow();
   // clang-format on
+  if (scene_memory) {
+    free(scene_memory);
+  }
+  if (music_memory) {
+    free(music_memory);
+  }
+  if (scratch_memory) {
+    free(scratch_memory);
+  }
   return 0;
 }
 }
-
 #ifdef WITH_MAIN
 int main() { return jump_start(); }
 #endif
