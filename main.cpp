@@ -5,7 +5,6 @@
 #include <raymath.h>
 #include <sstream>
 #include <string>
-#include <variant>
 #define FONTSIZE 75
 
 struct BumpAllocator {
@@ -120,18 +119,28 @@ struct NodeBinary;
 struct NodeUnary;
 struct NodeNumber;
 struct NodeVariable;
-using GenericNode =
-    std::variant<NodeNumber *, NodeVariable *, NodeUnary *, NodeBinary *>;
+// using GenericNode =
+//     std::variant<NodeNumber *, NodeVariable *, NodeUnary *, NodeBinary *>;
+
+struct GenericNode {
+  AST_NODE_TYPE type;
+  union {
+    NodeBinary *binary;
+    NodeUnary *unary;
+    NodeNumber *number;
+    NodeVariable *variable;
+  } data;
+};
 
 struct NodeBinary {
   BINOPS op;
-  std::variant<NodeNumber *, NodeVariable *, NodeUnary *, NodeBinary *> lhs;
-  std::variant<NodeNumber *, NodeVariable *, NodeUnary *, NodeBinary *> rhs;
+  GenericNode lhs;
+  GenericNode rhs;
 };
 
 struct NodeUnary {
   UNOPS op;
-  std::variant<NodeNumber *, NodeVariable *, NodeUnary *, NodeBinary *> lhs;
+  GenericNode lhs;
 };
 
 struct NodeNumber {
@@ -143,30 +152,29 @@ struct NodeVariable {
 };
 
 float evaluate_node(const GenericNode &node, float x, float y, float t) {
-  return std::visit(
-      [&](auto &&n) -> float {
-        using T = std::decay_t<decltype(n)>;
-        if constexpr (std::is_same_v<T, NodeNumber *>) {
-          return n->v;
-        } else if constexpr (std::is_same_v<T, NodeBinary *>) {
-          return eval(n->op, evaluate_node(n->lhs, x, y, t),
-                      evaluate_node(n->rhs, x, y, t));
-        } else if constexpr (std::is_same_v<T, NodeUnary *>) {
-          return eval(n->op, evaluate_node(n->lhs, x, y, t));
-        } else if constexpr (std::is_same_v<T, NodeVariable *>) {
-          if (n->v == "x")
-            return x;
-          if (n->v == "y")
-            return y;
-          if (n->v == "t")
-            return t;
-          abort();
-        } else {
-          abort();
-          return -1;
-        }
-      },
-      node);
+  switch (node.type) {
+  case AST_NODE_TYPE::AST_NODE_NUMBER:
+    return node.data.number->v;
+  case AST_NODE_TYPE::AST_NODE_VARIABLE: {
+    const auto &name = node.data.variable->v;
+    if (name == "x")
+      return x;
+    if (name == "y")
+      return y;
+    if (name == "t")
+      return t;
+    std::abort();
+  }
+  case AST_NODE_TYPE::AST_NODE_BINARY:
+    return eval(node.data.binary->op,
+                evaluate_node(node.data.binary->lhs, x, y, t),
+                evaluate_node(node.data.binary->rhs, x, y, t));
+  case AST_NODE_TYPE::AST_NODE_UNARY:
+    return eval(node.data.unary->op,
+                evaluate_node(node.data.unary->lhs, x, y, t));
+  default:
+    std::abort();
+  }
 }
 
 float rand_float(float min = -1.0f, float max = 1.0f) {
@@ -188,14 +196,16 @@ UNOPS random_unop() {
 GenericNode generate_random_ast_arena(int depth, BumpAllocator *arena) {
   if (depth <= 0) {
     if (rand_int(0, 1)) {
-      return new (arena->allocate<NodeNumber>(1)) NodeNumber{.v = rand_float()};
+      auto *number =
+          new (arena->allocate<NodeNumber>(1)) NodeNumber{.v = rand_float()};
+      return GenericNode{.type = AST_NODE_TYPE::AST_NODE_NUMBER,
+                         .data = {.number = number}};
     } else {
       int choice = rand_int(0, 2);
-      if (choice == 0)
-        return new (arena->allocate<NodeVariable>(1)) NodeVariable{"x"};
-      if (choice == 1)
-        return new (arena->allocate<NodeVariable>(1)) NodeVariable{"y"};
-      return new (arena->allocate<NodeVariable>(1)) NodeVariable{"t"};
+      std::string name = (choice == 0) ? "x" : (choice == 1) ? "y" : "t";
+      auto *var = new (arena->allocate<NodeVariable>(1)) NodeVariable{name};
+      return GenericNode{.type = AST_NODE_TYPE::AST_NODE_VARIABLE,
+                         .data = {.variable = var}};
     }
   }
 
@@ -203,20 +213,23 @@ GenericNode generate_random_ast_arena(int depth, BumpAllocator *arena) {
   switch (choice) {
   case 0:
   case 1:
-  case 3:
-    return new (arena->allocate<NodeBinary>(1)) NodeBinary{
-        .op = random_binop(),
-        .lhs = generate_random_ast_arena(depth - 1, arena),
-        .rhs = generate_random_ast_arena(depth - 1, arena),
-    };
+  case 3: {
+    auto *binary = new (arena->allocate<NodeBinary>(1))
+        NodeBinary{.op = random_binop(),
+                   .lhs = generate_random_ast_arena(depth - 1, arena),
+                   .rhs = generate_random_ast_arena(depth - 1, arena)};
+    return GenericNode{.type = AST_NODE_TYPE::AST_NODE_BINARY,
+                       .data = {.binary = binary}};
+  }
   case 2: {
-    return new (arena->allocate<NodeUnary>(1)) NodeUnary{
-        .op = random_unop(),
-        .lhs = generate_random_ast_arena(depth - 1, arena),
-    };
+    auto *unary = new (arena->allocate<NodeUnary>(1))
+        NodeUnary{.op = random_unop(),
+                  .lhs = generate_random_ast_arena(depth - 1, arena)};
+    return GenericNode{.type = AST_NODE_TYPE::AST_NODE_UNARY,
+                       .data = {.unary = unary}};
   }
   default:
-    fprintf(stderr, "ERROR: Reached unreachable state in BINOP switch ");
+    fprintf(stderr, "ERROR: Reached unreachable state in AST generator\n");
     abort();
   }
 }
@@ -249,157 +262,108 @@ std::string to_string(UNOPS op) {
   }
 }
 
-// void print_ast(const GenericNode &node, std::ostream &out = std::cout) {
-//   std::visit(
-//       [&](auto &&n) {
-//         using T = std::decay_t<decltype(n)>;
-//         if constexpr (std::is_same_v<T, NodeNumber *>) {
-//           out << n->v;
-//         } else if constexpr (std::is_same_v<T, NodeVariable *>) {
-//           out << n->v;
-//         } else if constexpr (std::is_same_v<T, NodeUnary *>) {
-//           out << to_string(n->op) << "(";
-//           print_ast(n->lhs, out);
-//           out << ")";
-//         } else if constexpr (std::is_same_v<T, NodeBinary *>) {
-//           out << "(";
-//           print_ast(n->lhs, out);
-//           out << " " << to_string(n->op) << " ";
-//           print_ast(n->rhs, out);
-//           out << ")";
-//         } else {
-//           out << "?";
-//         }
-//       },
-//       node);
-// }
-
 void write_expr(const GenericNode &node, FILE *f) {
-  std::visit(
-      [&](auto &&n) {
-        using T = std::decay_t<decltype(n)>;
-        if constexpr (std::is_same_v<T, NodeNumber *>) {
-          fprintf(f, "%f", n->v);
-        } else if constexpr (std::is_same_v<T, NodeVariable *>) {
-          fprintf(f, "%s", n->v.c_str());
-        } else if constexpr (std::is_same_v<T, NodeUnary *>) {
-          if (n->op == UNOPS::POW2) {
-            fprintf(f, "(");
-            write_expr(n->lhs, f);
-            fprintf(f, ")*(");
-            write_expr(n->lhs, f);
-            fprintf(f, ")");
-          } else if (n->op == UNOPS::SQRT) {
-            fprintf(f, "sqrt(fabs(");
-            write_expr(n->lhs, f);
-            fprintf(f, "))");
-          } else {
-            fprintf(f, "%s(2.0*M_PI*", to_string(n->op).c_str());
-            write_expr(n->lhs, f);
-            fprintf(f, ")");
-          }
-        } else if constexpr (std::is_same_v<T, NodeBinary *>) {
-          fprintf(f, "(");
-          write_expr(n->lhs, f);
-          fprintf(f, " %s ", to_string(n->op).c_str());
-          write_expr(n->rhs, f);
-          fprintf(f, ")");
-        }
-      },
-      node);
+  switch (node.type) {
+  case AST_NODE_TYPE::AST_NODE_NUMBER:
+    fprintf(f, "%f", node.data.number->v);
+    break;
+
+  case AST_NODE_TYPE::AST_NODE_VARIABLE:
+    fprintf(f, "%s", node.data.variable->v.c_str());
+    break;
+
+  case AST_NODE_TYPE::AST_NODE_UNARY: {
+    auto *n = node.data.unary;
+    if (n->op == UNOPS::POW2) {
+      fprintf(f, "(");
+      write_expr(n->lhs, f);
+      fprintf(f, ")*(");
+      write_expr(n->lhs, f);
+      fprintf(f, ")");
+    } else if (n->op == UNOPS::SQRT) {
+      fprintf(f, "sqrt(fabs(");
+      write_expr(n->lhs, f);
+      fprintf(f, "))");
+    } else {
+      fprintf(f, "%s(2.0*M_PI*", to_string(n->op).c_str());
+      write_expr(n->lhs, f);
+      fprintf(f, ")");
+    }
+    break;
+  }
+
+  case AST_NODE_TYPE::AST_NODE_BINARY: {
+    auto *n = node.data.binary;
+    fprintf(f, "(");
+    write_expr(n->lhs, f);
+    fprintf(f, " %s ", to_string(n->op).c_str());
+    write_expr(n->rhs, f);
+    fprintf(f, ")");
+    break;
+  }
+  default:
+    fprintf(stderr, "ERROR: Unknown AST node type in write_expr\n");
+    std::abort();
+  }
 }
-
-#if 0
-float (*codegen(const GenericNode &node))(float, float, float) {
-  static std::string last_so = "";
-  int rand_id = rand();
-  std::string base = ".gen_" + std::to_string(rand_id);
-  std::string c_file = ".code.c";
-  std::string so_file = base + ".so";
-  if (!last_so.empty()) {
-    std::remove(last_so.c_str());
-    std::remove(c_file.c_str());
-  }
-
-  FILE *f = fopen(c_file.c_str(), "w");
-  if (!f) {
-    perror("fopen");
-    return nullptr;
-  }
-  fprintf(f, "#include <math.h>\n");
-  fprintf(f, "float func(float x, float y, float t) {\n");
-  fprintf(f, "    return ");
-  write_expr(node, f);
-  fprintf(f, ";\n}\n");
-  fclose(f);
-
-  std::string cmd =
-      "gcc -fPIC -O3 -shared -march=native " + c_file + " -o " + so_file;
-  int ret = system(cmd.c_str());
-  if (ret != 0) {
-    fprintf(stderr, "Compilation failed\n");
-    return nullptr;
-  }
-  void *handle = dlopen(so_file.c_str(), RTLD_NOW);
-  if (!handle) {
-    fprintf(stderr, "dlopen error: %s\n", dlerror());
-    return nullptr;
-  }
-
-  void *sym = dlsym(handle, "func");
-  if (!sym) {
-    fprintf(stderr, "dlsym error: %s\n", dlerror());
-    dlclose(handle);
-    return nullptr;
-  }
-  last_so = so_file;
-  return reinterpret_cast<float (*)(float, float, float)>(sym);
-}
-#endif
 
 void write_expr(const GenericNode &node, std::ostream &out) {
-  std::visit(
-      [&](auto &&n) {
-        using T = std::decay_t<decltype(n)>;
-        if constexpr (std::is_same_v<T, NodeNumber *>) {
-          out << n->v;
-        } else if constexpr (std::is_same_v<T, NodeVariable *>) {
-          out << n->v;
-        } else if constexpr (std::is_same_v<T, NodeUnary *>) {
-          switch (n->op) {
-          case UNOPS::POW2:
-            out << "(";
-            write_expr(n->lhs, out);
-            out << ") * (";
-            write_expr(n->lhs, out);
-            out << ")";
-            break;
-          case UNOPS::SQRT:
-            out << "sqrt(abs(";
-            write_expr(n->lhs, out);
-            out << "))";
-            break;
-          case UNOPS::SIN:
-          case UNOPS::COS:
-            out << to_string(n->op) << "(2.0 * 3.14159265 * ";
-            write_expr(n->lhs, out);
-            out << ")";
-            break;
-          default:
-            out << to_string(n->op) << "(";
-            write_expr(n->lhs, out);
-            out << ")";
-            break;
-          }
-        } else if constexpr (std::is_same_v<T, NodeBinary *>) {
-          out << "(";
-          write_expr(n->lhs, out);
-          out << " " << to_string(n->op) << " ";
-          write_expr(n->rhs, out);
-          out << ")";
-        }
-      },
-      node);
+  switch (node.type) {
+  case AST_NODE_TYPE::AST_NODE_NUMBER:
+    out << node.data.number->v;
+    break;
+
+  case AST_NODE_TYPE::AST_NODE_VARIABLE:
+    out << node.data.variable->v;
+    break;
+
+  case AST_NODE_TYPE::AST_NODE_UNARY: {
+    auto *n = node.data.unary;
+    switch (n->op) {
+    case UNOPS::POW2:
+      out << "(";
+      write_expr(n->lhs, out);
+      out << ") * (";
+      write_expr(n->lhs, out);
+      out << ")";
+      break;
+
+    case UNOPS::SQRT:
+      out << "sqrt(abs(";
+      write_expr(n->lhs, out);
+      out << "))";
+      break;
+
+    case UNOPS::SIN:
+    case UNOPS::COS:
+      out << to_string(n->op) << "(2.0 * 3.14159265 * ";
+      write_expr(n->lhs, out);
+      out << ")";
+      break;
+
+    default:
+      out << to_string(n->op) << "(";
+      write_expr(n->lhs, out);
+      out << ")";
+      break;
+    }
+    break;
+  }
+
+  case AST_NODE_TYPE::AST_NODE_BINARY: {
+    auto *n = node.data.binary;
+    out << "(";
+    write_expr(n->lhs, out);
+    out << " " << to_string(n->op) << " ";
+    write_expr(n->rhs, out);
+    out << ")";
+    break;
+  }
+
+  default:
+    out << "/* ERROR: Unknown node type */";
+    std::abort();
+  }
 }
 
 std::string codegen_glsl(const GenericNode &node) {
