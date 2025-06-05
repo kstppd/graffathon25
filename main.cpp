@@ -59,7 +59,11 @@ struct BumpAllocator {
     _allocBytes = 0;
     _freeBytes = _totalBytes;
   }
-  template <typename F> void destroy_with(F &&f) { f(_memory); }
+  template <typename F> void destroy_with(F &&f) {
+    if (_memory) {
+      f(_memory);
+    }
+  }
 };
 
 struct Scene {
