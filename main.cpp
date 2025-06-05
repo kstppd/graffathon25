@@ -558,7 +558,7 @@ NOTES
 extern "C" {
 int jump_start() {
   // Setttings
-  constexpr int seed = 142; // Adam no touch! (0:142) (1:512)
+  constexpr int seed = 143; // Adam no touch! (0:142) (1:512)
   constexpr size_t SCENE_MEMORY_POOL = 512 * 1024ul * 1024ul;
   constexpr size_t MUSIC_MEMORY_POOL = 1024ul * 1024ul * 1024ul;
   constexpr int screenWidth = 2 * 72 * 16;
