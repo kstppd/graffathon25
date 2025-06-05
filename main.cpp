@@ -1,6 +1,6 @@
 #include <cstdio>
-#include <raylib.h>
 #include <math.h>
+#include <raylib.h>
 #define FONTSIZE 75
 
 inline Vector3 Vector3Scale(Vector3 a, float s) {
@@ -45,8 +45,7 @@ struct BumpAllocator {
 
   BumpAllocator(void *buffer, size_t bytes)
       : _memory(buffer), _sp(0), _totalBytes(bytes), _allocBytes(0),
-        _freeBytes(bytes) {
-  }
+        _freeBytes(bytes) {}
 
   template <typename T> T *allocate(size_t count) {
     if (count == 0) {
@@ -285,7 +284,7 @@ static GenericNode generate_random_ast_arena(int depth, BumpAllocator *arena) {
                        .data = {.unary = unary}};
   }
   default:
-    return generate_random_ast_arena(depth,arena);
+    return generate_random_ast_arena(depth, arena);
   }
 }
 
