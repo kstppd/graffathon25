@@ -1,4 +1,6 @@
+#include "raylib.h"
 #include <array>
+#include <cstring>
 #include <raylib.h>
 #include <raymath.h>
 #include <sstream>
@@ -6,15 +8,13 @@
 #include <variant>
 #define FONTSIZE 75
 
-class BumpAllocator {
-private:
+struct BumpAllocator {
   void *_memory = nullptr;
   std::size_t _sp = 0;
   std::size_t _totalBytes = 0;
   std::size_t _allocBytes = 0;
   std::size_t _freeBytes = 0;
 
-public:
   BumpAllocator(const BumpAllocator &) = delete;
   BumpAllocator &operator=(const BumpAllocator &) = delete;
   BumpAllocator(BumpAllocator &&) = delete;
@@ -518,7 +518,7 @@ const char *intro_texts(float t) {
   return nullptr;
 }
 
-void intro(Scene *sc, BumpAllocator *arena, float dur) {
+std::size_t intro(Scene *sc, BumpAllocator *arena, float dur) {
   (void)arena;
   (void)sc;
   const float W = GetScreenWidth();
@@ -526,7 +526,7 @@ void intro(Scene *sc, BumpAllocator *arena, float dur) {
   float actual_time = 0.0;
   Sound snd = LoadSoundFromWave(sc->wave);
   PlaySound(snd);
-  constexpr float dt = 1.5 * 1e-2;
+  constexpr float dt = 1 * 1e-2;
   Vector3 p1{1.0f, 0.0f, 0.0};
   Vector3 p2{0.8f, 0.0f, 0.0};
   std::size_t point_counter = 0;
@@ -535,27 +535,30 @@ void intro(Scene *sc, BumpAllocator *arena, float dur) {
     ClearBackground(BLACK);
     auto msg = intro_texts(actual_time);
     if (!msg) {
-      return;
+      return point_counter;
     }
     int text_width = MeasureText(msg, 100);
     BeginDrawing();
-    auto ps1 = Vector3Scale(p1, 16.0f);
-    auto ps2 = Vector3Scale(p2, 16.0f);
-    Vector2 cand1 = Vector2{ps1.z + (W / 2), ps1.y + (H / 2)};
-    Vector2 cand2 = Vector2{ps2.z + (W / 2), ps2.y + (H / 2)};
-    points[point_counter++] = cand1;
-    points[point_counter++] = cand2;
-    for (std::size_t i = 0; i < point_counter; ++i) {
-      DrawCircleV(points[i], 3, i % 2 == 0 ? RED : RAYWHITE);
+    for (std::size_t i = 0; i < 16 / 2; ++i) {
+      auto ps1 = Vector3Scale(p1, 24.0f);
+      auto ps2 = Vector3Scale(p2, 24.0f);
+      Vector2 cand1 = Vector2{ps1.x + (W / 2) + (W / 8), ps1.y + (H / 2)};
+      Vector2 cand2 = Vector2{ps2.x + (W / 2) + (W / 8), ps2.y + (H / 2)};
+      points[point_counter++] = cand1;
+      points[point_counter++] = cand2;
+      p1 = getAttractor(p1, dt / 2);
+      p2 = getAttractor(p2, dt / 2);
     }
-    p1 = getAttractor(p1, dt / 2);
-    p2 = getAttractor(p2, dt / 2);
+    for (std::size_t i = 0; i < point_counter; ++i) {
+      DrawCircleV(points[i], 1, i % 2 == 0 ? RED : BLUE);
+    }
     DrawText(msg, W / 4.0f - 0.5 * text_width, H / 2.0f, FONTSIZE, GOLD);
+    // DrawFPS(0,0);
     actual_time += GetFrameTime();
     EndDrawing();
   }
   UnloadSound(snd);
-  arena->release();
+  return point_counter;
 }
 
 int demo(Scene *sc, BumpAllocator *arena, BumpAllocator *music_arena,
@@ -609,7 +612,7 @@ int demo(Scene *sc, BumpAllocator *arena, BumpAllocator *music_arena,
   return 0;
 }
 
-void outro(Scene *sc, BumpAllocator *arena, float dur) {
+void outro(Scene *sc, BumpAllocator *arena, float dur, int n) {
   (void)arena;
   (void)sc;
   const float W = GetScreenWidth();
@@ -617,27 +620,16 @@ void outro(Scene *sc, BumpAllocator *arena, float dur) {
   float actual_time = 0.0;
   Sound snd = LoadSoundFromWave(sc->wave);
   PlaySound(snd);
-  constexpr float dt = 1.5 * 1e-2;
-  Vector3 p1{1.0f, 0.0f, 0.0};
-  Vector3 p2{0.8f, 0.0f, 0.0};
-  std::size_t point_counter = 0;
-  Vector2 *points = arena->allocate<Vector2>(1 < 14);
+  Vector2 *points = reinterpret_cast<Vector2 *>(arena->_memory);
   const char *msg = "See you next year!";
   while (!WindowShouldClose() && actual_time < dur) {
     ClearBackground(BLACK);
     int text_width = MeasureText(msg, 100);
     BeginDrawing();
-    auto ps1 = Vector3Scale(p1, 16.0f);
-    auto ps2 = Vector3Scale(p2, 16.0f);
-    Vector2 cand1 = Vector2{ps1.z + (W / 2), ps1.y + (H / 2)};
-    Vector2 cand2 = Vector2{ps2.z + (W / 2), ps2.y + (H / 2)};
-    points[++point_counter] = cand1;
-    points[++point_counter] = cand2;
-    for (std::size_t i = 0; i < point_counter; ++i) {
-      DrawCircleV(points[i], 3, i % 2 == 0 ? RED : RAYWHITE);
+    for (int i = n; i > 0; --i) {
+      DrawCircleV(points[i], 1, i % 2 == 0 ? RED : BLUE);
     }
-    p1 = getAttractor(p1, dt / 1);
-    p2 = getAttractor(p2, dt / 1);
+    n -= 16;
     DrawText(msg, W / 4.0f - 0.5 * text_width, H / 2.0f, FONTSIZE, GOLD);
     actual_time += GetFrameTime();
     EndDrawing();
@@ -728,26 +720,30 @@ extern "C" {
 int jump_start() {
   // Setttings
   constexpr int seed = 142; // Adam no touch! (0:142) (1:512)
-  constexpr std::size_t SCENE_MEMORY_POOL = 1024ul * 1024ul;
+  constexpr std::size_t SCENE_MEMORY_POOL = 512 * 1024ul * 1024ul;
   constexpr std::size_t MUSIC_MEMORY_POOL = 1024ul * 1024ul * 1024ul;
   constexpr int screenWidth = 2 * 72 * 16;
   constexpr int screenHeight = 2 * 72 * 9;
   constexpr float intro_dur = 20.0f;
   constexpr float demo_dur = 90.0f;
-  constexpr float outro_dur = 20.0f;
+  constexpr float outro_dur = intro_dur;
   constexpr int FPS = 60;
   //~Settings
   srand(seed);
 
   // Pool
   void *scene_memory = malloc(SCENE_MEMORY_POOL);
+  void *scratch_memory = malloc(SCENE_MEMORY_POOL);
   void *music_memory = malloc(MUSIC_MEMORY_POOL);
-  if (!scene_memory || !music_memory) {
+  if (!scene_memory || !music_memory || !scratch_memory) {
     fprintf(stderr,
             "ERROR: Could not allocate any memory for the damn pool!\n");
     return 1;
   }
+
+  // Init pools
   BumpAllocator scene_arena(scene_memory, SCENE_MEMORY_POOL);
+  BumpAllocator scratch_arena(scratch_memory, SCENE_MEMORY_POOL);
   BumpAllocator music_arena(music_memory, MUSIC_MEMORY_POOL);
 
   // clang-format off
@@ -764,7 +760,9 @@ int jump_start() {
        
         //Intro 
         scene.wave = generate_music(intro_dur,&music_arena,lorenz_track);
-        intro(&scene, &scene_arena, intro_dur);
+        auto n=intro(&scene, &scene_arena, intro_dur);
+        std::memcpy(scratch_memory,scene_memory,n*sizeof(Vector2));
+        scene_arena.release();
         music_arena.release();
         scene.wave={};
 
@@ -775,7 +773,7 @@ int jump_start() {
 
         //Outro
         scene.wave = generate_music(outro_dur,&music_arena,lorenz_track);
-        outro(&scene, &scene_arena, outro_dur);
+        outro(&scene, &scratch_arena, outro_dur, n);
         music_arena.release();
         
   UnloadImage(scene.img);
@@ -783,6 +781,7 @@ int jump_start() {
   CloseWindow();
   // clang-format on
   scene_arena.destroy_with(free);
+  scratch_arena.destroy_with(free);
   music_arena.destroy_with(free);
   return 0;
 }
