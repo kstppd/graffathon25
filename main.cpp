@@ -483,7 +483,7 @@ Vector3 getAttractor(Vector3 r0, float dt) {
   return r1;
 }
 
-struct MusicLorentzOscillator {
+struct MusicLorenzOscillator {
   Vector3 pos = {2.0f, 0.0f, 0.0f};
   float dt = 1e-5;
   float step() {
@@ -497,7 +497,7 @@ struct MusicLorentzOscillator {
   }
 };
 
-MusicLorentzOscillator music_osc{};
+MusicLorenzOscillator music_osc{};
 
 const char *intro_texts(float t) {
   if (t < 4.0) {
@@ -530,7 +530,7 @@ void intro(Scene *sc, BumpAllocator *arena, float dur) {
   Vector3 p1{1.0f, 0.0f, 0.0};
   Vector3 p2{0.8f, 0.0f, 0.0};
   std::size_t point_counter = 0;
-  Vector2 *points = arena->allocate<Vector2>(1 < 14);
+  Vector2 *points = arena->allocate<Vector2>(1 < 20);
   while (!WindowShouldClose() && actual_time < dur) {
     ClearBackground(BLACK);
     auto msg = intro_texts(actual_time);
@@ -543,13 +543,13 @@ void intro(Scene *sc, BumpAllocator *arena, float dur) {
     auto ps2 = Vector3Scale(p2, 16.0f);
     Vector2 cand1 = Vector2{ps1.z + (W / 2), ps1.y + (H / 2)};
     Vector2 cand2 = Vector2{ps2.z + (W / 2), ps2.y + (H / 2)};
-    points[++point_counter] = cand1;
-    points[++point_counter] = cand2;
+    points[point_counter++] = cand1;
+    points[point_counter++] = cand2;
     for (std::size_t i = 0; i < point_counter; ++i) {
       DrawCircleV(points[i], 3, i % 2 == 0 ? RED : RAYWHITE);
     }
-    p1 = getAttractor(p1, dt / 1);
-    p2 = getAttractor(p2, dt / 1);
+    p1 = getAttractor(p1, dt / 2);
+    p2 = getAttractor(p2, dt / 2);
     DrawText(msg, W / 4.0f - 0.5 * text_width, H / 2.0f, FONTSIZE, GOLD);
     actual_time += GetFrameTime();
     EndDrawing();
@@ -753,7 +753,7 @@ int jump_start() {
   // clang-format off
   SetTraceLogLevel(TraceLogLevel::LOG_NONE);
   InitWindow(screenWidth, screenHeight, "");
-  DisableCursor();
+  // DisableCursor();
   SetExitKey(KEY_ESCAPE);
   SetTargetFPS(FPS);
   InitAudioDevice();
