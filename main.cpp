@@ -1,45 +1,41 @@
-#include "raylib.h"
-#include <array>
+#include <cstdio>
 #include <cstring>
 #include <raylib.h>
 #include <raymath.h>
-#include <sstream>
-#include <string>
 #define FONTSIZE 75
 
 struct BumpAllocator {
   void *_memory = nullptr;
-  std::size_t _sp = 0;
-  std::size_t _totalBytes = 0;
-  std::size_t _allocBytes = 0;
-  std::size_t _freeBytes = 0;
+  size_t _sp = 0;
+  size_t _totalBytes = 0;
+  size_t _allocBytes = 0;
+  size_t _freeBytes = 0;
 
   BumpAllocator(const BumpAllocator &) = delete;
   BumpAllocator &operator=(const BumpAllocator &) = delete;
   BumpAllocator(BumpAllocator &&) = delete;
   BumpAllocator &operator=(BumpAllocator &&) = delete;
 
-  BumpAllocator(void *buffer, std::size_t bytes)
+  BumpAllocator(void *buffer, size_t bytes)
       : _memory(buffer), _sp(0), _totalBytes(bytes), _allocBytes(0),
         _freeBytes(bytes) {
     if (!buffer) {
-      std::abort();
+      abort();
     }
   }
 
-  template <typename T> T *allocate(std::size_t count) {
+  template <typename T> T *allocate(size_t count) {
     if (count == 0) {
       return nullptr;
     }
     const size_t bytesToAllocate = count * sizeof(T);
-    const size_t alignment = std::max(alignof(T), size_t(8));
+    const size_t alignment = fmax(alignof(T), size_t(8));
 
-    std::size_t baseAddress =
-        reinterpret_cast<std::size_t>((char *)_memory + _sp);
-    std::size_t padding = (baseAddress % alignment == 0)
-                              ? 0
-                              : (alignment - baseAddress % alignment);
-    std::size_t totalBytes = padding + bytesToAllocate;
+    size_t baseAddress = reinterpret_cast<size_t>((char *)_memory + _sp);
+    size_t padding = (baseAddress % alignment == 0)
+                         ? 0
+                         : (alignment - baseAddress % alignment);
+    size_t totalBytes = padding + bytesToAllocate;
 
     if (_sp + totalBytes > _totalBytes) {
       abort();
@@ -72,40 +68,9 @@ struct Scene {
   Wave wave;
 };
 
-enum class BINOPS : uint8_t { ADD, MUL, N_BINOPS };
+enum class BINOPS { ADD, MUL, N_BINOPS };
 
-enum class UNOPS : uint8_t { SIN, COS, SQRT, POW2, N_UNOPS };
-
-float eval(BINOPS op, float lhs, float rhs) {
-  float ret;
-  switch (op) {
-  case BINOPS::ADD:
-    ret = (lhs + rhs) / 2.0f;
-    break;
-  case BINOPS::MUL:
-    ret = (lhs * rhs);
-    break;
-  default:
-    abort();
-    break;
-  }
-  return ret;
-}
-
-float eval(UNOPS op, float lhs) {
-  switch (op) {
-  case UNOPS::SIN:
-    return std::sin(2.0 * M_PI * (lhs * M_PI / 180.0f));
-  case UNOPS::COS:
-    return std::cos(2.0 * M_PI * (lhs * M_PI / 180.0f));
-  case UNOPS::POW2:
-    return std::pow(lhs, 2);
-  case UNOPS::SQRT:
-    return std::sqrt(std::abs(lhs));
-  default:
-    abort();
-  }
-}
+enum class UNOPS { SIN, COS, SQRT, POW2, N_UNOPS };
 
 enum class AST_NODE_TYPE : u_int8_t {
   AST_NODE_NUMBER,
@@ -119,8 +84,6 @@ struct NodeBinary;
 struct NodeUnary;
 struct NodeNumber;
 struct NodeVariable;
-// using GenericNode =
-//     std::variant<NodeNumber *, NodeVariable *, NodeUnary *, NodeBinary *>;
 
 struct GenericNode {
   AST_NODE_TYPE type;
@@ -148,52 +111,148 @@ struct NodeNumber {
 };
 
 struct NodeVariable {
-  std::string v;
+  char v[8];
 };
 
-float evaluate_node(const GenericNode &node, float x, float y, float t) {
-  switch (node.type) {
-  case AST_NODE_TYPE::AST_NODE_NUMBER:
-    return node.data.number->v;
-  case AST_NODE_TYPE::AST_NODE_VARIABLE: {
-    const auto &name = node.data.variable->v;
-    if (name == "x")
-      return x;
-    if (name == "y")
-      return y;
-    if (name == "t")
-      return t;
-    std::abort();
-  }
-  case AST_NODE_TYPE::AST_NODE_BINARY:
-    return eval(node.data.binary->op,
-                evaluate_node(node.data.binary->lhs, x, y, t),
-                evaluate_node(node.data.binary->rhs, x, y, t));
-  case AST_NODE_TYPE::AST_NODE_UNARY:
-    return eval(node.data.unary->op,
-                evaluate_node(node.data.unary->lhs, x, y, t));
+static const char *to_string(BINOPS op) {
+  switch (op) {
+  case BINOPS::ADD:
+    return "+";
+  case BINOPS::MUL:
+    return "*";
   default:
-    std::abort();
+    abort();
   }
 }
 
-float rand_float(float min = -1.0f, float max = 1.0f) {
-  float scale = rand() / (float)RAND_MAX;
+static const char *to_string(UNOPS op) {
+  switch (op) {
+  case UNOPS::SIN:
+    return "sin";
+  case UNOPS::COS:
+    return "cos";
+  case UNOPS::POW2:
+    return "pow";
+  case UNOPS::SQRT:
+    return "sqrt";
+  default:
+    abort();
+  }
+}
+
+static char *write_expr(const GenericNode &node, char *out) {
+  switch (node.type) {
+  case AST_NODE_TYPE::AST_NODE_NUMBER:
+    out += sprintf(out, "%f", node.data.number->v);
+    break;
+  case AST_NODE_TYPE::AST_NODE_VARIABLE:
+    out += sprintf(out, "%s", node.data.variable->v);
+    break;
+  case AST_NODE_TYPE::AST_NODE_UNARY: {
+    auto *n = node.data.unary;
+    if (n->op == UNOPS::POW2) {
+      out += sprintf(out, "(");
+      out = write_expr(n->lhs, out);
+      out += sprintf(out, ")*(");
+      out = write_expr(n->lhs, out);
+      out += sprintf(out, ")");
+    } else if (n->op == UNOPS::SQRT) {
+      out += sprintf(out, "sqrt(abs(");
+      out = write_expr(n->lhs, out);
+      out += sprintf(out, "))");
+    } else {
+      out += sprintf(out, "%s(2.0*3.14*", to_string(n->op));
+      out = write_expr(n->lhs, out);
+      out += sprintf(out, ")");
+    }
+    break;
+  }
+  case AST_NODE_TYPE::AST_NODE_BINARY: {
+    auto *n = node.data.binary;
+    out += sprintf(out, "(");
+    out = write_expr(n->lhs, out);
+    out += sprintf(out, " %s ", to_string(n->op));
+    out = write_expr(n->rhs, out);
+    out += sprintf(out, ")");
+    break;
+  }
+  default:
+    abort();
+  }
+  return out;
+}
+
+// static const char *codegen_glsl(const GenericNode &node) {
+//   static char buffer[65536];
+//   char *out = buffer;
+//   out += sprintf(out, "#version 330 core\n"
+//                       "out vec4 FragColor;\n"
+//                       "uniform vec2 resolution;\n"
+//                       "uniform float time;\n\n"
+//                       "float wrap(float x, float minVal, float maxVal) {\n"
+//                       "    float range = maxVal - minVal;\n"
+//                       "    return minVal + mod((x - minVal + range),
+//                       range);\n"
+//                       "}\n\n"
+//                       "void main() {\n"
+//                       "    vec2 uv = gl_FragCoord.xy / resolution;\n"
+//                       "    float x = uv.x * 2.0 - 1.0;\n"
+//                       "    float y = uv.y * 2.0 - 1.0;\n"
+//                       "    float t = time / 5.0;\n"
+//                       "    float raw = ");
+//   out = write_expr(node, out);
+//   out += sprintf(out, ";\n"
+//                       "    float value = wrap(raw + 1.0, 0.0, 1.0);\n"
+//                       "    FragColor = vec4(vec3(value), 1.0);\n"
+//                       "}\n");
+//   return buffer;
+// }
+
+static const char *codegen_glsl_sawtooth(const GenericNode &node) {
+  static char buffer[65536];
+  char *out = buffer;
+  out += sprintf(out, "#version 330 core\n"
+                      "out vec4 FragColor;\n"
+                      "uniform vec2 resolution;\n"
+                      "uniform float time;\n\n"
+                      "float saw(float x) {\n"
+                      "    return fract(x);\n"
+                      "}\n\n"
+                      "void main() {\n"
+                      "    vec2 uv = gl_FragCoord.xy / resolution;\n"
+                      "    float x = uv.x * 2.0 - 1.0;\n"
+                      "    float y = uv.y * 2.0 - 1.0;\n"
+                      "    float t = time / 5.0;\n"
+                      "    float pulse = 1.0 + 0.5 * sin(6.2831 * t);\n"
+                      "    float base = ");
+  out = write_expr(node, out);
+  out += sprintf(out,
+                 ";\n"
+                 "    float r = saw(base * 2.0 + 0.0) * pulse;\n"
+                 "    float g = saw(base * 1.5 + 0.33) * pulse;\n"
+                 "    float b = saw(base * -3.0 + 0.67) * pulse;\n"
+                 "    FragColor = vec4(clamp(vec3(r, g, b), 0.0, 1.0), 1.0);\n"
+                 "}\n");
+  return buffer;
+}
+
+static float rand_float(float min = -1.0f, float max = 1.0f) {
+  const float scale = rand() / (float)RAND_MAX;
   return min + scale * (max - min);
 }
 
-int rand_int(int min, int max) { return min + rand() % (max - min + 1); }
+static int rand_int(int min, int max) { return min + rand() % (max - min + 1); }
 
-BINOPS random_binop() {
+static BINOPS random_binop() {
   return static_cast<BINOPS>(
       rand_int(0, -1 + static_cast<int>(BINOPS::N_BINOPS)));
 }
 
-UNOPS random_unop() {
+static UNOPS random_unop() {
   return static_cast<UNOPS>(rand_int(0, -1 + static_cast<int>(UNOPS::N_UNOPS)));
 }
 
-GenericNode generate_random_ast_arena(int depth, BumpAllocator *arena) {
+static GenericNode generate_random_ast_arena(int depth, BumpAllocator *arena) {
   if (depth <= 0) {
     if (rand_int(0, 1)) {
       auto *number =
@@ -202,8 +261,10 @@ GenericNode generate_random_ast_arena(int depth, BumpAllocator *arena) {
                          .data = {.number = number}};
     } else {
       int choice = rand_int(0, 2);
-      std::string name = (choice == 0) ? "x" : (choice == 1) ? "y" : "t";
-      auto *var = new (arena->allocate<NodeVariable>(1)) NodeVariable{name};
+      const char *name = (choice == 0) ? "x" : (choice == 1) ? "y" : "t";
+      auto *var = arena->allocate<NodeVariable>(1);
+      strncpy(var->v, name, sizeof(var->v));
+      var->v[sizeof(var->v) - 1] = '\0';
       return GenericNode{.type = AST_NODE_TYPE::AST_NODE_VARIABLE,
                          .data = {.variable = var}};
     }
@@ -229,194 +290,12 @@ GenericNode generate_random_ast_arena(int depth, BumpAllocator *arena) {
                        .data = {.unary = unary}};
   }
   default:
-    fprintf(stderr, "ERROR: Reached unreachable state in AST generator\n");
+    // fprintf(stderr, "ERROR: Reached unreachable state in AST generator\n");
     abort();
   }
 }
 
-std::string to_string(BINOPS op) {
-  switch (op) {
-  case BINOPS::ADD:
-    return "+";
-  case BINOPS::MUL:
-    return "*";
-  default:
-    fprintf(stderr, "ERROR: Reached unreachable state in BINOP switch ");
-    abort();
-  }
-}
-
-std::string to_string(UNOPS op) {
-  switch (op) {
-  case UNOPS::SIN:
-    return "sin";
-  case UNOPS::COS:
-    return "cos";
-  case UNOPS::POW2:
-    return "pow";
-  case UNOPS::SQRT:
-    return "sqrt";
-  default:
-    fprintf(stderr, "ERROR: Reached unreachable state in UNOP switch ");
-    abort();
-  }
-}
-
-void write_expr(const GenericNode &node, FILE *f) {
-  switch (node.type) {
-  case AST_NODE_TYPE::AST_NODE_NUMBER:
-    fprintf(f, "%f", node.data.number->v);
-    break;
-
-  case AST_NODE_TYPE::AST_NODE_VARIABLE:
-    fprintf(f, "%s", node.data.variable->v.c_str());
-    break;
-
-  case AST_NODE_TYPE::AST_NODE_UNARY: {
-    auto *n = node.data.unary;
-    if (n->op == UNOPS::POW2) {
-      fprintf(f, "(");
-      write_expr(n->lhs, f);
-      fprintf(f, ")*(");
-      write_expr(n->lhs, f);
-      fprintf(f, ")");
-    } else if (n->op == UNOPS::SQRT) {
-      fprintf(f, "sqrt(fabs(");
-      write_expr(n->lhs, f);
-      fprintf(f, "))");
-    } else {
-      fprintf(f, "%s(2.0*M_PI*", to_string(n->op).c_str());
-      write_expr(n->lhs, f);
-      fprintf(f, ")");
-    }
-    break;
-  }
-
-  case AST_NODE_TYPE::AST_NODE_BINARY: {
-    auto *n = node.data.binary;
-    fprintf(f, "(");
-    write_expr(n->lhs, f);
-    fprintf(f, " %s ", to_string(n->op).c_str());
-    write_expr(n->rhs, f);
-    fprintf(f, ")");
-    break;
-  }
-  default:
-    fprintf(stderr, "ERROR: Unknown AST node type in write_expr\n");
-    std::abort();
-  }
-}
-
-void write_expr(const GenericNode &node, std::ostream &out) {
-  switch (node.type) {
-  case AST_NODE_TYPE::AST_NODE_NUMBER:
-    out << node.data.number->v;
-    break;
-
-  case AST_NODE_TYPE::AST_NODE_VARIABLE:
-    out << node.data.variable->v;
-    break;
-
-  case AST_NODE_TYPE::AST_NODE_UNARY: {
-    auto *n = node.data.unary;
-    switch (n->op) {
-    case UNOPS::POW2:
-      out << "(";
-      write_expr(n->lhs, out);
-      out << ") * (";
-      write_expr(n->lhs, out);
-      out << ")";
-      break;
-
-    case UNOPS::SQRT:
-      out << "sqrt(abs(";
-      write_expr(n->lhs, out);
-      out << "))";
-      break;
-
-    case UNOPS::SIN:
-    case UNOPS::COS:
-      out << to_string(n->op) << "(2.0 * 3.14159265 * ";
-      write_expr(n->lhs, out);
-      out << ")";
-      break;
-
-    default:
-      out << to_string(n->op) << "(";
-      write_expr(n->lhs, out);
-      out << ")";
-      break;
-    }
-    break;
-  }
-
-  case AST_NODE_TYPE::AST_NODE_BINARY: {
-    auto *n = node.data.binary;
-    out << "(";
-    write_expr(n->lhs, out);
-    out << " " << to_string(n->op) << " ";
-    write_expr(n->rhs, out);
-    out << ")";
-    break;
-  }
-
-  default:
-    out << "/* ERROR: Unknown node type */";
-    std::abort();
-  }
-}
-
-std::string codegen_glsl(const GenericNode &node) {
-  std::ostringstream ss;
-  ss << "#version 330 core\n";
-  ss << "out vec4 FragColor;\n";
-  ss << "uniform vec2 resolution;\n";
-  ss << "uniform float time;\n\n";
-  ss << "float wrap(float x, float minVal, float maxVal) {\n";
-  ss << "    float range = maxVal - minVal;\n";
-  ss << "    return minVal + mod((x - minVal + range), range);\n";
-  ss << "}\n\n";
-  ss << "void main() {\n";
-  ss << "    vec2 uv = gl_FragCoord.xy / resolution;\n";
-  ss << "    float x = uv.x * 2.0 - 1.0;\n";
-  ss << "    float y = uv.y * 2.0 - 1.0;\n";
-  ss << "    float t = time / 5.0;\n";
-  ss << "    float raw = ";
-  write_expr(node, ss);
-  ss << ";\n";
-  ss << "    float value = wrap(raw + 1.0, 0.0, 1.0);\n";
-  ss << "    FragColor = vec4(vec3(value), 1.0);\n";
-  ss << "}\n";
-  return ss.str();
-}
-
-std::string codegen_glsl_sawtooth(const GenericNode &node) {
-  std::ostringstream ss;
-  ss << "#version 330 core\n";
-  ss << "out vec4 FragColor;\n";
-  ss << "uniform vec2 resolution;\n";
-  ss << "uniform float time;\n\n";
-  ss << "float saw(float x) {\n";
-  ss << "    return fract(x);\n";
-  ss << "}\n\n";
-  ss << "void main() {\n";
-  ss << "    vec2 uv = gl_FragCoord.xy / resolution;\n";
-  ss << "    float x = uv.x * 2.0 - 1.0;\n";
-  ss << "    float y = uv.y * 2.0 - 1.0;\n";
-  ss << "    float t = time / 5.0;\n";
-  ss << "    float pulse = 1.0 + 0.5 * sin(6.2831 * t);\n";
-  ss << "    float base = ";
-  write_expr(node, ss);
-  ss << ";\n";
-  ss << "    float r = saw(base * 2.0 + 0.0) * pulse;\n";
-  ss << "    float g = saw(base * 1.5 + 0.33) * pulse;\n";
-  ss << "    float b = saw(base * -3.0 + 0.67) * pulse;\n";
-  ss << "    FragColor = vec4(clamp(vec3(r, g, b), 0.0, 1.0), 1.0);\n";
-  ss << "}\n";
-  return ss.str();
-}
-
-template <std::floating_point T, typename F>
+template <typename T, typename F>
 static constexpr auto rk4(T yn, T tn, T h, F &&f) -> T {
   const auto k1 = f(tn, yn);
   const auto k2 = f(tn + h / T(2.0), yn + h * k1 / T(2.0));
@@ -426,7 +305,7 @@ static constexpr auto rk4(T yn, T tn, T h, F &&f) -> T {
   return yn1;
 }
 
-Vector3 getAttractor(Vector3 r0, float dt) {
+static Vector3 getAttractor(Vector3 r0, float dt) {
   static constexpr float SIGMA = 10.0;
   static constexpr float BETA = 8.0 / 3.0;
   static constexpr float RHO = 28.0;
@@ -467,7 +346,7 @@ struct MusicLorenzOscillator {
 
 MusicLorenzOscillator music_osc{};
 
-const char *intro_texts(float t) {
+static const char *intro_texts(float t) {
   if (t < 4.0) {
     return "Graffathon 2025!";
   }
@@ -486,7 +365,7 @@ const char *intro_texts(float t) {
   return nullptr;
 }
 
-std::size_t intro(Scene *sc, BumpAllocator *arena, float dur) {
+static size_t intro(Scene *sc, BumpAllocator *arena, float dur) {
   (void)arena;
   (void)sc;
   const float W = GetScreenWidth();
@@ -497,7 +376,7 @@ std::size_t intro(Scene *sc, BumpAllocator *arena, float dur) {
   constexpr float dt = 1 * 1e-2;
   Vector3 p1{1.0f, 0.0f, 0.0};
   Vector3 p2{0.8f, 0.0f, 0.0};
-  std::size_t point_counter = 0;
+  size_t point_counter = 0;
   Vector2 *points = arena->allocate<Vector2>(1 < 20);
   while (!WindowShouldClose() && actual_time < dur) {
     ClearBackground(BLACK);
@@ -507,7 +386,7 @@ std::size_t intro(Scene *sc, BumpAllocator *arena, float dur) {
     }
     int text_width = MeasureText(msg, 100);
     BeginDrawing();
-    for (std::size_t i = 0; i < 16 / 2; ++i) {
+    for (size_t i = 0; i < 16 / 2; ++i) {
       auto ps1 = Vector3Scale(p1, 24.0f);
       auto ps2 = Vector3Scale(p2, 24.0f);
       Vector2 cand1 = Vector2{ps1.x + (W / 2) + (W / 8), ps1.y + (H / 2)};
@@ -517,11 +396,10 @@ std::size_t intro(Scene *sc, BumpAllocator *arena, float dur) {
       p1 = getAttractor(p1, dt / 2);
       p2 = getAttractor(p2, dt / 2);
     }
-    for (std::size_t i = 0; i < point_counter; ++i) {
+    for (size_t i = 0; i < point_counter; ++i) {
       DrawCircleV(points[i], 1, i % 2 == 0 ? RED : BLUE);
     }
     DrawText(msg, W / 4.0f - 0.5 * text_width, H / 2.0f, FONTSIZE, GOLD);
-    // DrawFPS(0,0);
     actual_time += GetFrameTime();
     EndDrawing();
   }
@@ -529,8 +407,8 @@ std::size_t intro(Scene *sc, BumpAllocator *arena, float dur) {
   return point_counter;
 }
 
-int demo(Scene *sc, BumpAllocator *arena, BumpAllocator *music_arena,
-         float dur) {
+static int demo(Scene *sc, BumpAllocator *arena, BumpAllocator *music_arena,
+                float dur) {
   (void)music_arena;
   const int screenWidth = GetScreenWidth();
   const int screenHeight = GetScreenHeight();
@@ -542,7 +420,7 @@ int demo(Scene *sc, BumpAllocator *arena, BumpAllocator *music_arena,
 
   Sound snd = LoadSoundFromWave(sc->wave);
   PlaySound(snd);
-  Shader shader = LoadShaderFromMemory(0, glsl_str.c_str());
+  Shader shader = LoadShaderFromMemory(0, glsl_str);
   int locTime, locRes;
 
   locRes = GetShaderLocation(shader, "resolution");
@@ -557,7 +435,7 @@ int demo(Scene *sc, BumpAllocator *arena, BumpAllocator *music_arena,
       ast = generate_random_ast_arena(depth, arena);
       glsl_str = codegen_glsl_sawtooth(ast);
       UnloadShader(shader);
-      shader = LoadShaderFromMemory(0, glsl_str.c_str());
+      shader = LoadShaderFromMemory(0, glsl_str);
       locRes = GetShaderLocation(shader, "resolution");
       locTime = GetShaderLocation(shader, "time");
       SetShaderValue(shader, locRes, resolution, SHADER_UNIFORM_VEC2);
@@ -580,7 +458,7 @@ int demo(Scene *sc, BumpAllocator *arena, BumpAllocator *music_arena,
   return 0;
 }
 
-void outro(Scene *sc, BumpAllocator *arena, float dur, int n) {
+static void outro(Scene *sc, BumpAllocator *arena, float dur, int n) {
   (void)arena;
   (void)sc;
   const float W = GetScreenWidth();
@@ -607,27 +485,19 @@ void outro(Scene *sc, BumpAllocator *arena, float dur, int n) {
 }
 
 // Singature has to be (float,....)
-float custom_track_0(float t, const std::array<float, 3> &freqs) {
-  float out = 0.0f;
-  for (auto f : freqs) {
-    out += sinf(2.0f * M_PI * f * t);
-  }
-  return out / freqs.size();
-}
-
-float custom_track_1(float t) {
-  std::array<float, 6> freqs = {220.0f,  261.63f, 293.66f,
-                                329.63f, 392.0f,  440.0f};
+static float custom_track_1(float t) {
+  static float freqs[6] = {220.0f, 261.63f, 293.66f, 329.63f, 392.0f, 440.0f};
+  static size_t n_freqs = sizeof(freqs) / sizeof(freqs[0]);
   float bpm = 3 * 120.0f;
   float beat_period = 90.0f / bpm;
-  float beat_phase = std::fmod(t, beat_period);
-  float envelope = std::sin(M_PI * beat_phase / beat_period);
+  float beat_phase = fmodf(t, beat_period);
+  float envelope = sinf(M_PI * beat_phase / beat_period);
   static float last_switch = -1000.0f;
   static int base_idx = 0;
   static float phases[4] = {};
   static float amps[4] = {};
   if (t - last_switch > 2.0f) {
-    base_idx = rand() % (freqs.size() - 4);
+    base_idx = rand() % (n_freqs - 4);
     for (int i = 0; i < 4; ++i) {
       phases[i] = ((float)rand() / (float)RAND_MAX) * 2.0f * M_PI;
       amps[i] = 0.8f + ((float)rand() / (float)RAND_MAX) * 0.4f;
@@ -637,24 +507,23 @@ float custom_track_1(float t) {
   float sum = 0.0f;
   for (int i = 0; i < 4; ++i) {
     float freq = freqs[base_idx + i];
-    sum += amps[i] * std::sin(2.0f * M_PI * freq * t + phases[i]);
+    sum += amps[i] * sinf(2.0f * M_PI * freq * t + phases[i]);
   }
-
   return envelope * (sum / 4.0f);
 }
 
-float lorenz_track(float t) {
+static float lorenz_track(float t) {
   float freq = music_osc.step();
   auto beat = [](float t) {
     float beat_freq = 4.0f;
-    float base_freq = 32.0f + 16.0f * std::sin(M_PI * t);
-    return std::cos(2.0f * M_PI * beat_freq * t) *
-           std::sin(2.0f * M_PI * base_freq * t);
+    float base_freq = 32.0f + 16.0f * sinf(M_PI * t);
+    return sinf(2.0f * M_PI * beat_freq * t + 90.0f * (M_PI / 180.0f)) *
+           sinf(2.0f * M_PI * base_freq * t);
   };
-  return 0.7 * std::sin(2.0f * M_PI * freq * t) + 0.3 * beat(t);
+  return 0.7 * sinf(2.0f * M_PI * freq * t) + 0.3 * beat(t);
 }
 
-template <typename T> T clamp(const T &value, const T min, const T max) {
+template <typename T> T static clamp(const T &value, const T min, const T max) {
   if (value < min) {
     return min;
   }
@@ -665,15 +534,14 @@ template <typename T> T clamp(const T &value, const T min, const T max) {
 }
 
 template <typename F, typename... Args>
-Wave generate_music(float duration, BumpAllocator *arena, F &&f,
-                    Args &&...args) {
+static Wave generate_music(float duration, BumpAllocator *arena, F &&f,
+                           Args &&...args) {
   using music_type_t = short;
-  constexpr std::size_t sampleRate = 48000;
-  const std::size_t sampleCount =
-      static_cast<std::size_t>(duration * sampleRate);
+  constexpr size_t sampleRate = 48000;
+  const size_t sampleCount = static_cast<size_t>(duration * sampleRate);
   music_type_t *samples = arena->allocate<music_type_t>(sampleCount);
 
-  for (std::size_t i = 0; i < sampleCount; i++) {
+  for (size_t i = 0; i < sampleCount; i++) {
     float t = static_cast<float>(i) / sampleRate;
     float val = f(t, std::forward<Args>(args)...);
     val = clamp(val, -1.0f, 1.0f);
@@ -692,17 +560,17 @@ Wave generate_music(float duration, BumpAllocator *arena, F &&f,
 
 /*
 NOTES
-+ Due to memory pool usage waves do not need to be unloaded
++Due to memory pool usage waves do not need to be unloaded
 */
 extern "C" {
 int jump_start() {
   // Setttings
   constexpr int seed = 142; // Adam no touch! (0:142) (1:512)
-  constexpr std::size_t SCENE_MEMORY_POOL = 512 * 1024ul * 1024ul;
-  constexpr std::size_t MUSIC_MEMORY_POOL = 1024ul * 1024ul * 1024ul;
+  constexpr size_t SCENE_MEMORY_POOL = 512 * 1024ul * 1024ul;
+  constexpr size_t MUSIC_MEMORY_POOL = 1024ul * 1024ul * 1024ul;
   constexpr int screenWidth = 2 * 72 * 16;
   constexpr int screenHeight = 2 * 72 * 9;
-  constexpr float intro_dur = 20.0f;
+  constexpr float intro_dur = 2.0f;
   constexpr float demo_dur = 90.0f;
   constexpr float outro_dur = intro_dur;
   constexpr int FPS = 60;
@@ -710,12 +578,12 @@ int jump_start() {
   srand(seed);
 
   // Pool
-  void *scene_memory = malloc(SCENE_MEMORY_POOL);
-  void *scratch_memory = malloc(SCENE_MEMORY_POOL);
-  void *music_memory = malloc(MUSIC_MEMORY_POOL);
+  void *scene_memory = RL_MALLOC(SCENE_MEMORY_POOL);
+  void *scratch_memory = RL_MALLOC(SCENE_MEMORY_POOL);
+  void *music_memory = RL_MALLOC(MUSIC_MEMORY_POOL);
   if (!scene_memory || !music_memory || !scratch_memory) {
-    fprintf(stderr,
-            "ERROR: Could not allocate any memory for the damn pool!\n");
+    // fprintf(stderr,
+    //         "ERROR: Could not allocate any memory for the damn pool!\n");
     return 1;
   }
 
@@ -758,9 +626,9 @@ int jump_start() {
   UnloadTexture(scene.tex);
   CloseWindow();
   // clang-format on
-  scene_arena.destroy_with(free);
-  scratch_arena.destroy_with(free);
-  music_arena.destroy_with(free);
+  // scene_arena.destroy_with(RL_FREE);
+  // scratch_arena.destroy_with(RL_FREE);
+  // music_arena.destroy_with(RL_FREE);
   return 0;
 }
 }

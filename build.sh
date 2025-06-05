@@ -10,7 +10,10 @@ make PLATFORM=PLATFORM_DESKTOP RAYLIB_LIBTYPE=SHARED -j 12
 clear
 cd ${BASE}
 
-g++ -c  main.cpp ${INC_FLAGS} ${CXX_FLAGS}
-nasm -f elf64 start.asm 
-g++ start.o  main.o   ${LD_FLAGS}  -lraylib -o demo
+EXTRA=" -nostdlib  -fno-unroll-loops -Wl,--build-id=none -Wl,-z,norelro -ffast-math -fsingle-precision-constant -fmerge-all-constants -fno-unroll-loops -fno-math-errno -falign-functions=1 -falign-jumps=1 -falign-loops=1 -fno-stack-protector -fomit-frame-pointer -ffunction-sections -fdata-sections -Wl,--gc-sections"
+g++ -c ${EXTRA} main.cpp ${INC_FLAGS} ${CXX_FLAGS}
+nasm -f elf64 start.asm -Ox
+g++  ${EXTRA}   start.o  main.o  ${LD_FLAGS} -lc -lm -lraylib -o demo
+strip -S --strip-unneeded --remove-section=.note.gnu.gold-version --remove-section=.comment --remove-section=.note --remove-section=.note.gnu.build-id --remove-section=.note.ABI-tag demo
 rm start.o main.o
+ls -ahl demo
