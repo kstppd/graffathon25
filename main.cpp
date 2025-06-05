@@ -1,8 +1,35 @@
 #include <cstdio>
-#include <cstring>
 #include <raylib.h>
-#include <raymath.h>
+#include <math.h>
 #define FONTSIZE 75
+
+inline Vector3 Vector3Scale(Vector3 a, float s) {
+  return Vector3{a.x * s, a.y * s, a.z * s};
+}
+
+inline float Vector3Length(Vector3 a) {
+  return sqrtf(a.x * a.x + a.y * a.y + a.z * a.z);
+}
+
+static void *memcpy(void *dest, const void *src, unsigned int n) {
+  char *d = (char *)dest;
+  const char *s = (const char *)src;
+  for (unsigned int i = 0; i < n; i++) {
+    d[i] = s[i];
+  }
+  return dest;
+}
+
+static char *strncpy(char *dest, const char *src, unsigned int n) {
+  unsigned int i = 0;
+  for (; i < n && src[i] != '\0'; i++) {
+    dest[i] = src[i];
+  }
+  for (; i < n; i++) {
+    dest[i] = '\0';
+  }
+  return dest;
+}
 
 struct BumpAllocator {
   void *_memory = nullptr;
@@ -19,9 +46,6 @@ struct BumpAllocator {
   BumpAllocator(void *buffer, size_t bytes)
       : _memory(buffer), _sp(0), _totalBytes(bytes), _allocBytes(0),
         _freeBytes(bytes) {
-    if (!buffer) {
-      abort();
-    }
   }
 
   template <typename T> T *allocate(size_t count) {
@@ -38,7 +62,6 @@ struct BumpAllocator {
     size_t totalBytes = padding + bytesToAllocate;
 
     if (_sp + totalBytes > _totalBytes) {
-      abort();
       return nullptr;
     }
 
@@ -121,7 +144,7 @@ static const char *to_string(BINOPS op) {
   case BINOPS::MUL:
     return "*";
   default:
-    abort();
+    return nullptr;
   }
 }
 
@@ -136,7 +159,7 @@ static const char *to_string(UNOPS op) {
   case UNOPS::SQRT:
     return "sqrt";
   default:
-    abort();
+    return nullptr;
   }
 }
 
@@ -176,37 +199,9 @@ static char *write_expr(const GenericNode &node, char *out) {
     out += sprintf(out, ")");
     break;
   }
-  default:
-    abort();
   }
   return out;
 }
-
-// static const char *codegen_glsl(const GenericNode &node) {
-//   static char buffer[65536];
-//   char *out = buffer;
-//   out += sprintf(out, "#version 330 core\n"
-//                       "out vec4 FragColor;\n"
-//                       "uniform vec2 resolution;\n"
-//                       "uniform float time;\n\n"
-//                       "float wrap(float x, float minVal, float maxVal) {\n"
-//                       "    float range = maxVal - minVal;\n"
-//                       "    return minVal + mod((x - minVal + range),
-//                       range);\n"
-//                       "}\n\n"
-//                       "void main() {\n"
-//                       "    vec2 uv = gl_FragCoord.xy / resolution;\n"
-//                       "    float x = uv.x * 2.0 - 1.0;\n"
-//                       "    float y = uv.y * 2.0 - 1.0;\n"
-//                       "    float t = time / 5.0;\n"
-//                       "    float raw = ");
-//   out = write_expr(node, out);
-//   out += sprintf(out, ";\n"
-//                       "    float value = wrap(raw + 1.0, 0.0, 1.0);\n"
-//                       "    FragColor = vec4(vec3(value), 1.0);\n"
-//                       "}\n");
-//   return buffer;
-// }
 
 static const char *codegen_glsl_sawtooth(const GenericNode &node) {
   static char buffer[65536];
@@ -290,8 +285,7 @@ static GenericNode generate_random_ast_arena(int depth, BumpAllocator *arena) {
                        .data = {.unary = unary}};
   }
   default:
-    // fprintf(stderr, "ERROR: Reached unreachable state in AST generator\n");
-    abort();
+    return generate_random_ast_arena(depth,arena);
   }
 }
 
@@ -357,10 +351,10 @@ static const char *intro_texts(float t) {
     return "By GreenHouse!";
   }
   if (t >= 12.0 && t < 16) {
-    return "..in under 27 KB!";
+    return "..in under 16 KB!";
   }
   if (t >= 16.0 && t < 20) {
-    return " 27 KB? LMFAO! <3";
+    return " 16 KB? LMFAO! <3";
   }
   return nullptr;
 }
@@ -570,7 +564,7 @@ int jump_start() {
   constexpr size_t MUSIC_MEMORY_POOL = 1024ul * 1024ul * 1024ul;
   constexpr int screenWidth = 2 * 72 * 16;
   constexpr int screenHeight = 2 * 72 * 9;
-  constexpr float intro_dur = 2.0f;
+  constexpr float intro_dur = 20.0f;
   constexpr float demo_dur = 90.0f;
   constexpr float outro_dur = intro_dur;
   constexpr int FPS = 60;
@@ -582,8 +576,6 @@ int jump_start() {
   void *scratch_memory = RL_MALLOC(SCENE_MEMORY_POOL);
   void *music_memory = RL_MALLOC(MUSIC_MEMORY_POOL);
   if (!scene_memory || !music_memory || !scratch_memory) {
-    // fprintf(stderr,
-    //         "ERROR: Could not allocate any memory for the damn pool!\n");
     return 1;
   }
 
@@ -607,7 +599,8 @@ int jump_start() {
         //Intro 
         scene.wave = generate_music(intro_dur,&music_arena,lorenz_track);
         auto n=intro(&scene, &scene_arena, intro_dur);
-        std::memcpy(scratch_memory,scene_memory,n*sizeof(Vector2));
+        memcpy(scratch_memory,scene_memory,n*sizeof(Vector2));
+                               
         scene_arena.release();
         music_arena.release();
         scene.wave={};
@@ -626,9 +619,6 @@ int jump_start() {
   UnloadTexture(scene.tex);
   CloseWindow();
   // clang-format on
-  // scene_arena.destroy_with(RL_FREE);
-  // scratch_arena.destroy_with(RL_FREE);
-  // music_arena.destroy_with(RL_FREE);
   return 0;
 }
 }
