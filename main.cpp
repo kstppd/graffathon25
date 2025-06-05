@@ -686,6 +686,16 @@ float lorenz_track(float t) {
   return 0.7 * std::sin(2.0f * M_PI * freq * t) + 0.3 * beat(t);
 }
 
+template <typename T> T clamp(const T &value, const T min, const T max) {
+  if (value < min) {
+    return min;
+  }
+  if (value > max) {
+    return max;
+  }
+  return value;
+}
+
 template <typename F, typename... Args>
 Wave generate_music(float duration, BumpAllocator *arena, F &&f,
                     Args &&...args) {
@@ -698,7 +708,7 @@ Wave generate_music(float duration, BumpAllocator *arena, F &&f,
   for (std::size_t i = 0; i < sampleCount; i++) {
     float t = static_cast<float>(i) / sampleRate;
     float val = f(t, std::forward<Args>(args)...);
-    val = std::clamp(val, -1.0f, 1.0f);
+    val = clamp(val, -1.0f, 1.0f);
     samples[i] = static_cast<music_type_t>(val * 31000);
   }
 
