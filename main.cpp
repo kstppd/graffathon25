@@ -344,7 +344,7 @@ static const char *intro_texts(float t) {
     return "Graffathon 2025!";
   }
   if (t >= 4.0 && t < 8.0) {
-    return "LSD Picasso";
+    return "A.S.T. Picasso";
   }
   if (t >= 8.0 && t < 12.0) {
     return "By GreenHouse!";
@@ -508,8 +508,8 @@ static float custom_track_1(float t) {
 static float lorenz_track(float t) {
   float freq = music_osc.step();
   auto beat = [](float t) {
-    float beat_freq = 4.0f;
-    float base_freq = 32.0f + 16.0f * sinf(M_PI * t);
+    float beat_freq = 40.0f;
+    float base_freq = 32.0f + 1.0f * sinf(M_PI * t);
     return sinf(2.0f * M_PI * beat_freq * t + 90.0f * (M_PI / 180.0f)) *
            sinf(2.0f * M_PI * base_freq * t);
   };
