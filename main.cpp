@@ -1,35 +1,32 @@
 #include <raylib.h>
 #include <thread>
-// #include "raymath.h"
 #include <cmath>
 #include <cstdio>
 #include <math.h>
-#include <omp.h>
-#include "raylib/src/external/miniaudio.h"
 #define FONTSIZE 75
 
 // Digital SYNTH Stuff
-#define MAX_SAMPLES               512
-#define MAX_SAMPLES_PER_UPDATE   4096
+#define MAX_SAMPLES 512
+#define MAX_SAMPLES_PER_UPDATE 4096
 #define AST_INTERVAL 2.0f
-#define NOTE_C   261.63
-#define NOTE_CS  277.18
-#define NOTE_D   293.66
-#define NOTE_DS  311.13
-#define NOTE_E   329.63
+#define NOTE_C 261.63
+#define NOTE_CS 277.18
+#define NOTE_D 293.66
+#define NOTE_DS 311.13
+#define NOTE_E 329.63
 #define NOTE_Eb 311.13f
-#define NOTE_F   349.23
-#define NOTE_FS  369.99
-#define NOTE_G   392.00
-#define NOTE_GS  415.30
-#define NOTE_A   440.00
-#define NOTE_AS  466.16
-#define NOTE_B   493.88
+#define NOTE_F 349.23
+#define NOTE_FS 369.99
+#define NOTE_G 392.00
+#define NOTE_GS 415.30
+#define NOTE_A 440.00
+#define NOTE_AS 466.16
+#define NOTE_B 493.88
 #define SEMITONE 1.05946
 
 constexpr int NUM_BASS_NOTES = 4;
-constexpr float bassline_freqs[NUM_BASS_NOTES] = {
-    NOTE_C / 4, NOTE_D / 4, NOTE_Eb / 4, NOTE_F / 4 };
+constexpr float bassline_freqs[NUM_BASS_NOTES] = {NOTE_C / 4, NOTE_D / 4,
+                                                  NOTE_Eb / 4, NOTE_F / 4};
 constexpr float SR = 48000.0f;
 static inline float next_octave(float note) { return note * 2.0f; }
 static inline float prev_octave(float note) { return note * 2.0f; }
@@ -41,21 +38,20 @@ float alpha(float cutoff_freq) {
   return dt / (rc + dt);
 }
 
-inline float noise() {
-    return 2.0f * ((rand() / (float)RAND_MAX) - 0.5f);
-}
+inline float noise() { return 2.0f * ((rand() / (float)RAND_MAX) - 0.5f); }
 
 static float osc_sine(float t, float fundamental) {
-  return sinf(2.0f*M_PI*fundamental*t);
+  return sinf(2.0f * M_PI * fundamental * t);
 }
- 
+
 // https://en.wikipedia.org/wiki/Square_wave_(waveform)
 static float osc_square(float t, float fundamental) {
   const float nyquist = SR * 0.5f;
   const int max_harmonic = (int)(nyquist / fundamental);
   float value = 0.0f;
   for (int k = 1; k <= max_harmonic; ++k) {
-    value += sinf(2.0f * M_PI * (2.0f*k-1.0f)*fundamental*t) / (2.0f*k-1.0f);
+    value += sinf(2.0f * M_PI * (2.0f * k - 1.0f) * fundamental * t) /
+             (2.0f * k - 1.0f);
   }
   value *= 4.0f / M_PI;
   return value;
@@ -74,22 +70,29 @@ static float osc_sawtooth(float t, float fundamental) {
 }
 
 float lfo(float input, float &prev_output, float alpha) {
-    prev_output = prev_output + alpha * (input - prev_output);
-    return prev_output;
+  prev_output = prev_output + alpha * (input - prev_output);
+  return prev_output;
 }
+struct ADSR {
+  float onset;
+  float note_length;
+  float attack;
+  float decay;
+  float sustain;
+  float release;
+};
 
 float adsr(float t, float onset, float note_length, float attack, float decay,
            float sustain, float release) {
   float dt = t - onset;
-
   if (dt < 0)
     return 0;
   if (dt < attack)
-    return dt / attack; 
+    return dt / attack;
   if (dt < attack + decay)
-    return 1.0f - (1.0f - sustain) * ((dt - attack) / decay); 
+    return 1.0f - (1.0f - sustain) * ((dt - attack) / decay);
   if (dt < note_length)
-    return sustain; 
+    return sustain;
   if (dt < note_length + release)
     return sustain * (1.0f - (dt - note_length) / release);
   return 0;
@@ -811,63 +814,88 @@ template <typename T> T static clamp(const T &value, const T min, const T max) {
   return value;
 }
 
-float wrap(float x, float minVal, float maxVal){
-    float range = maxVal - minVal;
-    return minVal + fmodf((x - minVal + range), range);
+float wrap(float x, float minVal, float maxVal) {
+  float range = maxVal - minVal;
+  return minVal + fmodf((x - minVal + range), range);
 }
 
-static float audio_time = 0.0f;
-constexpr float dt = 1.0f / SR;
+static float demo_time = 0.0f;
+static float dt = 1.0f / SR;
 
+//IVAN
 void callback(void *buffer, unsigned int frames) {
 
   float *d = reinterpret_cast<float *>(buffer);
   float a = alpha(300);
+
   for (unsigned int i = 0; i < frames; ++i) {
     static float prev = 0;
-    float t_in_bar = fmodf(audio_time, 2.0f);
+    float t_in_bar = fmodf(demo_time, 2.0f);
     float sample = 0.0f;
 
-    // Kick
-    for (int b = 0; b < 2; ++b) {
-      float onset = b * 1.0f;
-      float env = adsr(t_in_bar, onset, 0.3f, 0.01f, 0.1f, 0.2f, 0.1f);
-      sample += env * osc_sine(audio_time, NOTE_C / 8);
-    }
+    if (demo_time < 5.0) {
+      // Kick
+      float onset = 0.0f;
+      float env = adsr(t_in_bar, onset, 0.3f, 0.01f, 0.1f, 0.4f, 0.1f);
+      sample += 1.0 * env * osc_sine(demo_time, NOTE_A);
 
-    // Snare
-    for (int b = 0; b < 2; ++b) {
-      float onset = 0.5f + b * 1.0f;
-      float env = adsr(t_in_bar, onset, 0.15f, 0.005f, 0.05f, 0.2f, 0.05f);
-      sample += 0.5f * env * osc_square(audio_time, NOTE_C / 8);
-    }
+      // Synth
+      float onset1 = 0.5f;
+      float env1 = adsr(t_in_bar, onset1, 0.3f, 0.01f, 0.1f, 0.2f, 0.1f);
+      sample += 1.0 * env1 * osc_sine(demo_time, NOTE_B);
+      float onset2 = 0.9f;
+      float env2 = adsr(t_in_bar, onset2, 0.3f, 0.01f, 0.1f, 0.2f, 0.1f);
+      sample += 1.0 * env2 * osc_sine(demo_time, NOTE_D);
 
-    // Noise
-    {
-      for (int b = 0; b < 8; ++b) {
-        float onset = b * 0.25f;
-        float rel_time = t_in_bar - onset;
-        if (rel_time >= 0.0f && rel_time < 0.08f) {
-          float env =
-              adsr(t_in_bar, onset, 0.001f, 0.005f, 0.05f, 0.05f, 0.02f);
-          float n = noise(); // Random sample
-          sample += 0.05f * env * n;
-        }
+    } else if (demo_time < 100.0) {
+      // Kick
+      for (int b = 0; b < 2; ++b) {
+        float onset = b * 1.0f;
+        float env = adsr(t_in_bar, onset, 0.3f, 0.04f, 0.1f, 0.2f, 0.1f);
+        sample += env * osc_sine(demo_time, NOTE_CS);
       }
     }
-    
-    // Bassline
-    int bass_index = (int)(t_in_bar / 0.5f) % NUM_BASS_NOTES;
-    float bass_freq = bassline_freqs[bass_index];
-    float bass_env =
-        adsr(fmodf(t_in_bar, 0.5f), 0.0f, 0.2f, 0.01f, 0.05f, 0.3f, 0.1f);
-    sample += 0.6f * bass_env * osc_sine(audio_time, bass_freq);
+
+    // // Snare
+    // for (int b = 0; b < 8; ++b) {
+    //   float onset = b * 0.25f;
+    //   float env = adsr(t_in_bar, onset, 0.15f, 0.005f, 0.05f, 0.2f, 0.05f);
+    //   sample += 0.5f * env * osc_square(demo_time, NOTE_C );
+    // }
+
+    // // Snare
+    // for (int b = 0; b < 2; ++b) {
+    //   float onset = 1.5f + b * 1.0f;
+    //   float env = adsr(t_in_bar, onset, 0.15f, 0.005f, 0.05f, 0.2f, 0.05f);
+    //   sample += 0.5f * env * osc_square(demo_time, NOTE_C );
+    // }
+
+    // // Noise
+    // {
+    //   for (int b = 0; b < 8; ++b) {
+    //     float onset = b * 0.25f;
+    //     float rel_time = t_in_bar - onset;
+    //     if (rel_time >= 0.0f && rel_time < 0.08f) {
+    //       float env =
+    //           adsr(t_in_bar, onset, 0.001f, 0.005f, 0.05f, 0.05f, 0.02f);
+    //       float n = noise(); // Random sample
+    //       sample += 0.05f * env * n;
+    //     }
+    //   }
+    // }
+
+    // // Bassline
+    // int bass_index = (int)(t_in_bar / 0.5f) % NUM_BASS_NOTES;
+    // float bass_freq = bassline_freqs[bass_index];
+    // float bass_env =
+    //     adsr(fmodf(t_in_bar, 0.5f), 0.0f, 0.2f, 0.01f, 0.05f, 0.3f, 0.1f);
+    // sample += 0.6f * bass_env * osc_sine(demo_time, bass_freq);
 
     sample = lfo(sample, prev, a);
     sample = clamp(sample, -1.0f, 1.0f);
     d[2 * i] = sample;
     d[2 * i + 1] = sample;
-    audio_time += dt;
+    demo_time += dt;
   }
 }
 
@@ -905,12 +933,12 @@ int jump_start() {
   BumpAllocator music_arena(music_memory, MUSIC_MEMORY_POOL);
 
   // clang-format off
-  // SetTraceLogLevel(TraceLogLevel::LOG_NONE);
+  SetTraceLogLevel(TraceLogLevel::LOG_NONE);
   InitWindow(screenWidth, screenHeight, "");
   // DisableCursor();
   SetExitKey(KEY_ESCAPE);
   InitAudioDevice();
-  // SetAudioStreamBufferSizeDefault(1<<10);
+  SetAudioStreamBufferSizeDefault(1<<10);
   AudioStream stream = LoadAudioStream(SR, 32, 2);
   AttachAudioStreamProcessor(stream, callback);
   PlayAudioStream(stream);  
