@@ -1,8 +1,99 @@
+#include <raylib.h>
+#include <thread>
+// #include "raymath.h"
+#include <cmath>
 #include <cstdio>
 #include <math.h>
-#include <raylib.h>
+#include <omp.h>
+#include "raylib/src/external/miniaudio.h"
 #define FONTSIZE 75
+
+// Digital SYNTH Stuff
+#define MAX_SAMPLES               512
+#define MAX_SAMPLES_PER_UPDATE   4096
 #define AST_INTERVAL 2.0f
+#define NOTE_C   261.63
+#define NOTE_CS  277.18
+#define NOTE_D   293.66
+#define NOTE_DS  311.13
+#define NOTE_E   329.63
+#define NOTE_Eb 311.13f
+#define NOTE_F   349.23
+#define NOTE_FS  369.99
+#define NOTE_G   392.00
+#define NOTE_GS  415.30
+#define NOTE_A   440.00
+#define NOTE_AS  466.16
+#define NOTE_B   493.88
+#define SEMITONE 1.05946
+
+constexpr int NUM_BASS_NOTES = 4;
+constexpr float bassline_freqs[NUM_BASS_NOTES] = {
+    NOTE_C / 4, NOTE_D / 4, NOTE_Eb / 4, NOTE_F / 4 };
+constexpr float SR = 48000.0f;
+static inline float next_octave(float note) { return note * 2.0f; }
+static inline float prev_octave(float note) { return note * 2.0f; }
+template <typename T> T static clamp(const T &value, const T min, const T max);
+
+float alpha(float cutoff_freq) {
+  float rc = 1.0f / (2.0f * M_PI * cutoff_freq);
+  float dt = 1.0f / SR;
+  return dt / (rc + dt);
+}
+
+inline float noise() {
+    return 2.0f * ((rand() / (float)RAND_MAX) - 0.5f);
+}
+
+static float osc_sine(float t, float fundamental) {
+  return sinf(2.0f*M_PI*fundamental*t);
+}
+ 
+// https://en.wikipedia.org/wiki/Square_wave_(waveform)
+static float osc_square(float t, float fundamental) {
+  const float nyquist = SR * 0.5f;
+  const int max_harmonic = (int)(nyquist / fundamental);
+  float value = 0.0f;
+  for (int k = 1; k <= max_harmonic; ++k) {
+    value += sinf(2.0f * M_PI * (2.0f*k-1.0f)*fundamental*t) / (2.0f*k-1.0f);
+  }
+  value *= 4.0f / M_PI;
+  return value;
+}
+
+// https://en.wikipedia.org/wiki/Sawtooth_wave
+static float osc_sawtooth(float t, float fundamental) {
+  const float nyquist = SR * 0.5f;
+  const int max_harmonic = (int)(nyquist / fundamental);
+  float value = 0.0f;
+  for (int k = 1; k <= max_harmonic; ++k) {
+    value += sinf(2.0f * M_PI * fundamental * k * t) / k;
+  }
+  value *= -2.0f / M_PI;
+  return value;
+}
+
+float lfo(float input, float &prev_output, float alpha) {
+    prev_output = prev_output + alpha * (input - prev_output);
+    return prev_output;
+}
+
+float adsr(float t, float onset, float note_length, float attack, float decay,
+           float sustain, float release) {
+  float dt = t - onset;
+
+  if (dt < 0)
+    return 0;
+  if (dt < attack)
+    return dt / attack; 
+  if (dt < attack + decay)
+    return 1.0f - (1.0f - sustain) * ((dt - attack) / decay); 
+  if (dt < note_length)
+    return sustain; 
+  if (dt < note_length + release)
+    return sustain * (1.0f - (dt - note_length) / release);
+  return 0;
+}
 
 inline Vector3 Vector3Scale(Vector3 a, float s) {
   return Vector3{a.x * s, a.y * s, a.z * s};
@@ -62,6 +153,7 @@ struct BumpAllocator {
     size_t totalBytes = padding + bytesToAllocate;
 
     if (_sp + totalBytes > _totalBytes) {
+      abort();
       return nullptr;
     }
 
@@ -88,7 +180,6 @@ struct Scene {
   Image img;
   Texture2D tex;
   float time = {0.0f};
-  Wave wave;
 };
 
 enum class BINOPS { ADD, MUL, N_BINOPS };
@@ -391,8 +482,6 @@ static size_t intro(Scene *sc, BumpAllocator *arena, float dur) {
   const float W = GetScreenWidth();
   const float H = GetScreenHeight();
   float actual_time = 0.0;
-  Sound snd = LoadSoundFromWave(sc->wave);
-  PlaySound(snd);
   constexpr float dt = 1 * 1e-2;
   Vector3 p1{1.0f, 0.0f, 0.0};
   Vector3 p2{0.8f, 0.0f, 0.0};
@@ -423,7 +512,6 @@ static size_t intro(Scene *sc, BumpAllocator *arena, float dur) {
     actual_time += GetFrameTime();
     EndDrawing();
   }
-  UnloadSound(snd);
   return point_counter;
 }
 
@@ -464,8 +552,6 @@ static void post_intro(Scene *sc, BumpAllocator *arena, float dur) {
   const float W = GetScreenWidth();
   const float H = GetScreenHeight();
   float actual_time = 0.0;
-  Sound snd = LoadSoundFromWave(sc->wave);
-  PlaySound(snd);
   constexpr float dt = 1 * 1e-2;
   Vector3 p1{1.3f, 0.0f, 0.0};
   Vector3 p2{0.4f, 0.0f, 0.0};
@@ -476,17 +562,17 @@ static void post_intro(Scene *sc, BumpAllocator *arena, float dur) {
   while (!WindowShouldClose() && actual_time < dur) {
     ClearBackground(BLACK);
     // Spawn an AST and then revert actual time back
-    if (actual_time > 26 && flag) {
-      float store = actual_time;
-      // Create a Pool from my Pool -> Insane!
-      BumpAllocator tmp1(arena->allocate<float>(1024 * 1024),
-                         1024 * sizeof(float));
-      flag = false;
-      demo(sc, arena, &tmp1, 2, 8);
-      ClearBackground(BLACK);
-      actual_time = store + GetFrameTime();
-      continue;
-    }
+    // if (actual_time > 26 && flag) {
+    //   float store = actual_time;
+    //   // Create a Pool from my Pool -> Insane!
+    //   BumpAllocator tmp1(arena->allocate<float>(1024 * 1024),
+    //                      1024 * sizeof(float));
+    //   flag = false;
+    //   demo(sc, arena, &tmp1, 2, 8);
+    //   ClearBackground(BLACK);
+    //   actual_time = store + GetFrameTime();
+    //   continue;
+    // }
     auto msg = intro_post1_texts(actual_time);
     if (!msg) {
       return;
@@ -645,7 +731,6 @@ static void post_intro(Scene *sc, BumpAllocator *arena, float dur) {
     actual_time += GetFrameTime();
     EndDrawing();
   }
-  UnloadSound(snd);
   return;
 }
 
@@ -658,12 +743,8 @@ static int demo(Scene *sc, BumpAllocator *arena, BumpAllocator *music_arena,
   auto ast = generate_random_ast_arena(depth, arena);
   auto glsl_str = codegen_glsl_sawtooth_grayscale(ast);
   float actual_time = 0.0;
-
-  Sound snd = LoadSoundFromWave(sc->wave);
-  PlaySound(snd);
   Shader shader = LoadShaderFromMemory(0, glsl_str);
   int locTime, locRes;
-
   locRes = GetShaderLocation(shader, "resolution");
   locTime = GetShaderLocation(shader, "time");
   float resolution[2] = {(float)screenWidth, (float)screenHeight};
@@ -681,10 +762,8 @@ static int demo(Scene *sc, BumpAllocator *arena, BumpAllocator *music_arena,
       locRes = GetShaderLocation(shader, "resolution");
       locTime = GetShaderLocation(shader, "time");
       SetShaderValue(shader, locRes, resolution, SHADER_UNIFORM_VEC2);
-      SetShaderValue(shader, locTime, &sc->time, SHADER_UNIFORM_FLOAT);
     }
-    SetShaderValue(shader, GetShaderLocation(shader, "time"), &sc->time,
-                   SHADER_UNIFORM_FLOAT);
+    SetShaderValue(shader, locTime, &sc->time, SHADER_UNIFORM_FLOAT);
     BeginDrawing();
     ClearBackground(WHITE);
     BeginShaderMode(shader);
@@ -695,7 +774,6 @@ static int demo(Scene *sc, BumpAllocator *arena, BumpAllocator *music_arena,
     actual_time += GetFrameTime();
     EndDrawing();
   }
-  UnloadSound(snd);
   UnloadShader(shader);
   return 0;
 }
@@ -706,8 +784,6 @@ static void outro(Scene *sc, BumpAllocator *arena, float dur, int n) {
   const float W = GetScreenWidth();
   const float H = GetScreenHeight();
   float actual_time = 0.0;
-  Sound snd = LoadSoundFromWave(sc->wave);
-  PlaySound(snd);
   Vector2 *points = reinterpret_cast<Vector2 *>(arena->_memory);
   const char *msg = "See you next year!";
   while (!WindowShouldClose() && actual_time < dur) {
@@ -722,48 +798,8 @@ static void outro(Scene *sc, BumpAllocator *arena, float dur, int n) {
     actual_time += GetFrameTime();
     EndDrawing();
   }
-  UnloadSound(snd);
   arena->release();
 }
-
-// Singature has to be (float,....)
-static float custom_track_1(float t) {
-  static float freqs[6] = {220.0f, 261.63f, 293.66f, 329.63f, 392.0f, 440.0f};
-  static size_t n_freqs = sizeof(freqs) / sizeof(freqs[0]);
-  float bpm = 3 * 120.0f;
-  float beat_period = 90.0f / bpm;
-  float beat_phase = fmodf(t, beat_period);
-  float envelope = sinf(M_PI * beat_phase / beat_period);
-  static float last_switch = -1000.0f;
-  static int base_idx = 0;
-  static float phases[4] = {};
-  static float amps[4] = {};
-  if (t - last_switch > 2.0f) {
-    base_idx = rand() % (n_freqs - 4);
-    for (int i = 0; i < 4; ++i) {
-      phases[i] = ((float)rand() / (float)RAND_MAX) * 2.0f * M_PI;
-      amps[i] = 0.8f + ((float)rand() / (float)RAND_MAX) * 0.4f;
-    }
-    last_switch = t;
-  }
-  float sum = 0.0f;
-  for (int i = 0; i < 4; ++i) {
-    float freq = freqs[base_idx + i];
-    sum += amps[i] * sinf(2.0f * M_PI * freq * t + phases[i]);
-  }
-  return envelope * (sum / 4.0f);
-}
-
-// static float lorenz_track(float t) {
-//   float freq = music_osc.step();
-//   auto beat = [](float t) {
-//     float beat_freq = 40.0f;
-//     float base_freq = 32.0f + 1.0f * sinf(M_PI * t);
-//     return sinf(2.0f * M_PI * beat_freq * t + 90.0f * (M_PI / 180.0f)) *
-//            sinf(2.0f * M_PI * base_freq * t);
-//   };
-//   return 0.7 * sinf(2.0f * M_PI * freq * t) + 0.3 * beat(t);
-// }
 
 template <typename T> T static clamp(const T &value, const T min, const T max) {
   if (value < min) {
@@ -775,29 +811,64 @@ template <typename T> T static clamp(const T &value, const T min, const T max) {
   return value;
 }
 
-template <typename F, typename... Args>
-static Wave generate_music(float duration, BumpAllocator *arena, F &&f,
-                           Args &&...args) {
-  using music_type_t = short;
-  constexpr size_t sampleRate = 48000;
-  const size_t sampleCount = static_cast<size_t>(duration * sampleRate);
-  music_type_t *samples = arena->allocate<music_type_t>(sampleCount);
+float wrap(float x, float minVal, float maxVal){
+    float range = maxVal - minVal;
+    return minVal + fmodf((x - minVal + range), range);
+}
 
-  for (size_t i = 0; i < sampleCount; i++) {
-    float t = static_cast<float>(i) / sampleRate;
-    float val = f(t, std::forward<Args>(args)...);
-    val = clamp(val, -1.0f, 1.0f);
-    samples[i] = static_cast<music_type_t>(val * 31000);
+static float audio_time = 0.0f;
+constexpr float dt = 1.0f / SR;
+
+void callback(void *buffer, unsigned int frames) {
+
+  float *d = reinterpret_cast<float *>(buffer);
+  float a = alpha(300);
+  for (unsigned int i = 0; i < frames; ++i) {
+    static float prev = 0;
+    float t_in_bar = fmodf(audio_time, 2.0f);
+    float sample = 0.0f;
+
+    // Kick
+    for (int b = 0; b < 2; ++b) {
+      float onset = b * 1.0f;
+      float env = adsr(t_in_bar, onset, 0.3f, 0.01f, 0.1f, 0.2f, 0.1f);
+      sample += env * osc_sine(audio_time, NOTE_C / 8);
+    }
+
+    // Snare
+    for (int b = 0; b < 2; ++b) {
+      float onset = 0.5f + b * 1.0f;
+      float env = adsr(t_in_bar, onset, 0.15f, 0.005f, 0.05f, 0.2f, 0.05f);
+      sample += 0.5f * env * osc_square(audio_time, NOTE_C / 8);
+    }
+
+    // Noise
+    {
+      for (int b = 0; b < 8; ++b) {
+        float onset = b * 0.25f;
+        float rel_time = t_in_bar - onset;
+        if (rel_time >= 0.0f && rel_time < 0.08f) {
+          float env =
+              adsr(t_in_bar, onset, 0.001f, 0.005f, 0.05f, 0.05f, 0.02f);
+          float n = noise(); // Random sample
+          sample += 0.05f * env * n;
+        }
+      }
+    }
+    
+    // Bassline
+    int bass_index = (int)(t_in_bar / 0.5f) % NUM_BASS_NOTES;
+    float bass_freq = bassline_freqs[bass_index];
+    float bass_env =
+        adsr(fmodf(t_in_bar, 0.5f), 0.0f, 0.2f, 0.01f, 0.05f, 0.3f, 0.1f);
+    sample += 0.6f * bass_env * osc_sine(audio_time, bass_freq);
+
+    sample = lfo(sample, prev, a);
+    sample = clamp(sample, -1.0f, 1.0f);
+    d[2 * i] = sample;
+    d[2 * i + 1] = sample;
+    audio_time += dt;
   }
-
-  Wave wave = {
-      .frameCount = static_cast<unsigned int>(sampleCount),
-      .sampleRate = sampleRate,
-      .sampleSize = 16,
-      .channels = 1,
-      .data = samples,
-  };
-  return wave;
 }
 
 /*
@@ -812,11 +883,11 @@ int jump_start() {
   constexpr size_t MUSIC_MEMORY_POOL = 1024ul * 1024ul * 1024ul;
   constexpr int screenWidth = 2 * 72 * 16;
   constexpr int screenHeight = 2 * 72 * 9;
-  constexpr float intro_dur = 12.0f;
+  constexpr float intro_dur = 3.0f;
   constexpr float post_intro_1_dur = 31.0f;
   constexpr float demo_dur = 60.0f;
   constexpr float outro_dur = intro_dur;
-  constexpr int FPS = 60;
+  constexpr int FPS = 30;
   //~Settings
   srand(seed);
 
@@ -834,41 +905,42 @@ int jump_start() {
   BumpAllocator music_arena(music_memory, MUSIC_MEMORY_POOL);
 
   // clang-format off
-  SetTraceLogLevel(TraceLogLevel::LOG_NONE);
+  // SetTraceLogLevel(TraceLogLevel::LOG_NONE);
   InitWindow(screenWidth, screenHeight, "");
-  DisableCursor();
+  // DisableCursor();
   SetExitKey(KEY_ESCAPE);
-  SetTargetFPS(FPS);
   InitAudioDevice();
-  
-        //Setup Scene
-        Scene scene{.img=GenImageColor(screenWidth, screenHeight, BLACK),.tex={},.time=0.0,.wave={}};
-        scene.tex = LoadTextureFromImage(scene.img);
-       
-        //Intro 
-        // scene.wave = generate_music(intro_dur,&music_arena,lorenz_track);
-        auto n=intro(&scene, &scene_arena, intro_dur);
-        memcpy(scratch_memory,scene_memory,n*sizeof(Vector2));
-        scene_arena.release();
-        music_arena.release();
-        
-        //Post Intro 1 
-        post_intro(&scene, &scene_arena, post_intro_1_dur);
-        scene_arena.release();
-        music_arena.release();
-                              
-        // Main demo with AST
-        scene.wave = generate_music(demo_dur,&music_arena,custom_track_1);
-        demo(&scene, &scene_arena,&music_arena,demo_dur);
-        music_arena.release();
+  // SetAudioStreamBufferSizeDefault(1<<10);
+  AudioStream stream = LoadAudioStream(SR, 32, 2);
+  AttachAudioStreamProcessor(stream, callback);
+  PlayAudioStream(stream);  
+  SetTargetFPS(FPS);
+   
+          // Setup Scene
+          Scene scene{.img = GenImageColor(screenWidth, screenHeight, BLACK),
+                      .tex = {},
+                      .time = 0.0};
+          scene.tex = LoadTextureFromImage(scene.img);
 
-        //Outro
-        // scene.wave = generate_music(outro_dur,&music_arena,lorenz_track);
-        outro(&scene, &scratch_arena, outro_dur, n);
-        music_arena.release();
+          // Intro
+          auto n = intro(&scene, &scene_arena, intro_dur);
+          memcpy(scratch_memory, scene_memory, n * sizeof(Vector2));
+          scene_arena.release();
+
+         // Post Intro 1
+          post_intro(&scene, &scene_arena, post_intro_1_dur);
+          scene_arena.release();
+
+          // Main demo with AST
+          demo(&scene, &scene_arena, &music_arena, demo_dur,6);
+
+          // Outro
+          outro(&scene, &scratch_arena, outro_dur, n);
         
   UnloadImage(scene.img);
   UnloadTexture(scene.tex);
+  UnloadAudioStream(stream);
+  CloseAudioDevice(); 
   CloseWindow();
   // clang-format on
   if (scene_memory) {
