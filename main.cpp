@@ -6,8 +6,6 @@
 
 // MUSIC Stuff
 constexpr int FONTSIZE = 75;
-constexpr float MAX_SAMPLES = 512;
-constexpr float MAX_SAMPLES_PER_UPDATE = 4096;
 constexpr float AST_INTERVAL = 2.0f;
 constexpr float NOTE_C = 261.63;
 constexpr float NOTE_CS = 277.18;
@@ -587,7 +585,7 @@ static const char *intro_post1_texts(float t) {
   return nullptr;
 }
 
-static int demo(Scene *sc, BumpAllocator *arena, BumpAllocator *music_arena,
+static int demo_ast(Scene *sc, BumpAllocator *arena, BumpAllocator *music_arena,
                 float dur, int depth = 8);
 
 static void post_intro(Scene *sc, BumpAllocator *arena, float dur) {
@@ -612,7 +610,7 @@ static void post_intro(Scene *sc, BumpAllocator *arena, float dur) {
       BumpAllocator tmp1(arena->allocate<float>(1024 * 1024),
                          1024 * sizeof(float));
       flag = false;
-      demo(sc, arena, &tmp1, 2, 8);
+      demo_ast(sc, arena, &tmp1, 2, 8);
       ClearBackground(BLACK);
       actual_time = store + GetFrameTime();
       continue;
@@ -778,7 +776,7 @@ static void post_intro(Scene *sc, BumpAllocator *arena, float dur) {
   return;
 }
 
-static int demo(Scene *sc, BumpAllocator *arena, BumpAllocator *music_arena,
+static int demo_ast(Scene *sc, BumpAllocator *arena, BumpAllocator *music_arena,
                 float dur, int depth) {
   (void)music_arena;
   const int screenWidth = GetScreenWidth();
@@ -822,6 +820,14 @@ static int demo(Scene *sc, BumpAllocator *arena, BumpAllocator *music_arena,
   return 0;
 }
 
+static void demo_march(Scene *sc, BumpAllocator *arena, BumpAllocator *music_arena,
+                float dur) {
+    const int screenWidth = GetScreenWidth();
+    const int screenHeight = GetScreenHeight();
+    (void)music_arena;
+    arena->release();
+}
+
 static void outro(Scene *sc, BumpAllocator *arena, float dur, int n) {
   (void)arena;
   (void)sc;
@@ -858,7 +864,7 @@ int jump_start() {
   constexpr size_t MUSIC_MEMORY_POOL = 1024ul * 1024ul * 1024ul;
   constexpr int screenWidth = 2 * 72 * 16;
   constexpr int screenHeight = 2 * 72 * 9;
-  constexpr float intro_dur = 3.0f;
+  constexpr float intro_dur = 12.0f;
   constexpr float post_intro_1_dur = 31.0f;
   constexpr float demo_dur = 60.0f;
   constexpr float outro_dur = intro_dur;
@@ -896,7 +902,6 @@ int jump_start() {
                       .tex = {},
                       .time = 0.0};
           scene.tex = LoadTextureFromImage(scene.img);
-
           // Intro
           auto n = intro(&scene, &scene_arena, intro_dur);
           memcpy(scratch_memory, scene_memory, n * sizeof(Vector2));
@@ -907,7 +912,8 @@ int jump_start() {
           scene_arena.release();
 
           // Main demo with AST
-          demo(&scene, &scene_arena, &music_arena, demo_dur,6);
+          demo_ast(&scene, &scene_arena, &music_arena, demo_dur,6);
+          // demo_march(&scene, &scene_arena, &music_arena, demo_dur);
 
           // Outro
           outro(&scene, &scratch_arena, outro_dur, n);
