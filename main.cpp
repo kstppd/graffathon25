@@ -32,6 +32,7 @@ struct BumpAllocator {
     if (count == 0) {
       return nullptr;
     }
+    return (T *)malloc(count * sizeof(T));
     const size_t bytesToAllocate = count * sizeof(T);
     const size_t alignment = fmax(alignof(T), size_t(8));
 
@@ -70,7 +71,7 @@ struct ComplexNum {
   fft_type_t i;
 };
 
-static constexpr inline bool isPow2(unsigned int  val) noexcept {
+static constexpr inline bool isPow2(unsigned int val) noexcept {
   return (val & (val - 1)) == 0;
 }
 
@@ -139,52 +140,44 @@ static constexpr float osc_sawtooth(float t, float fundamental) {
   return value;
 }
 
-
 struct LowPassFilter {
-    float prev = 0.0f;
-    float alpha = 0.1f;
+  float prev = 0.0f;
+  float alpha = 0.1f;
 
-    LowPassFilter(float cutoff) {
-        setCutoff(cutoff);
-    }
+  LowPassFilter(float cutoff) { setCutoff(cutoff); }
 
-    void setCutoff(float cutoff) {
-        float rc = 1.0f / (2.0f * M_PI * cutoff);
-        float dt = 1.0f / SR;
-        alpha = dt / (rc + dt);
-    }
+  void setCutoff(float cutoff) {
+    float rc = 1.0f / (2.0f * M_PI * cutoff);
+    float dt = 1.0f / SR;
+    alpha = dt / (rc + dt);
+  }
 
-    float process(float input) {
-        prev = prev + alpha * (input - prev);
-        return prev;
-    }
+  float process(float input) {
+    prev = prev + alpha * (input - prev);
+    return prev;
+  }
 };
-
 
 struct HighPassFilter {
-    float prev_input = 0.0f;
-    float prev_output = 0.0f;
-    float alpha = 0.1f;
+  float prev_input = 0.0f;
+  float prev_output = 0.0f;
+  float alpha = 0.1f;
 
-    HighPassFilter(float cutoff) {
-        setCutoff(cutoff);
-    }
+  HighPassFilter(float cutoff) { setCutoff(cutoff); }
 
-    void setCutoff(float cutoff) {
-        float rc = 1.0f / (2.0f * M_PI * cutoff);
-        float dt = 1.0f / SR;
-        alpha = rc / (rc + dt);
-    }
+  void setCutoff(float cutoff) {
+    float rc = 1.0f / (2.0f * M_PI * cutoff);
+    float dt = 1.0f / SR;
+    alpha = rc / (rc + dt);
+  }
 
-    float process(float input) {
-        float output = alpha * (prev_output + input - prev_input);
-        prev_input = input;
-        prev_output = output;
-        return output;
-    }
+  float process(float input) {
+    float output = alpha * (prev_output + input - prev_input);
+    prev_input = input;
+    prev_output = output;
+    return output;
+  }
 };
-
-
 
 static constexpr float LPF(float input, float &prev_output, float alpha) {
   prev_output = prev_output + alpha * (input - prev_output);
@@ -299,8 +292,8 @@ void apply_hann(ComplexNum *signal, size_t N) {
   }
 }
 
-static HighPassFilter hp_filter_lead(100.0f);  // Set your cutoff in Hz
-static LowPassFilter lp_filter_kick(400.0f);   // Set your cutoff in Hz
+static HighPassFilter hp_filter_lead(100.0f); // Set your cutoff in Hz
+static LowPassFilter lp_filter_kick(400.0f);  // Set your cutoff in Hz
 
 // IVAN
 static void callback(void *buffer, unsigned int frames) {
@@ -315,132 +308,143 @@ static void callback(void *buffer, unsigned int frames) {
     float t_in_bar = fmodf(demo_time, 2.0f);
     float sample = 0.0f;
 
-    // Check out bar
-    // if (demo_time < 8.0) {               
-    //   }      
-    #if 0
-    sample=osc_sine(demo_time, 5000);
-    #else
+// Check out bar
+// if (demo_time < 8.0) {
+//   }
+#if 1
+    sample = osc_sine(demo_time, 5000);
+#else
     /// first part // lead only  // up to 8.0
-    if (demo_time < 8.0) {            
+    if (demo_time < 8.0) {
       for (int b = 0; b < 8; ++b) {
         float onset1 = b * 0.5f;
-        float env1 = adsr(t_in_bar, ADSR(onset1, 0.5f, 0.5f, 0.05f, 0.2f, 0.05f));  // Lead Synth tune       
-        sample += 0.1f * env1 * osc_square(demo_time, NOTE_AS/4-20);
-        //sample = hp_filter_lead.process(sample);         
-      }      
+        float env1 = adsr(t_in_bar, ADSR(onset1, 0.5f, 0.5f, 0.05f, 0.2f,
+                                         0.05f)); // Lead Synth tune
+        sample += 0.1f * env1 * osc_square(demo_time, NOTE_AS / 4 - 20);
+        // sample = hp_filter_lead.process(sample);
+      }
     }
 
     /// 2nd part // lead + kick // up to 24.0
-    else if (demo_time < 31.0) {  
+    else if (demo_time < 31.0) {
       for (int b = 0; b < 8; ++b) {
-        
-      float onset1 = b * 0.5f;
-      float onset2 = b * 0.25f;
 
-      float env2 = adsr(t_in_bar, ADSR(onset2, 0.5f, 0.005f, 0.004f, 0.001f, 0.003f));  // Kick tune
-      sample += 2.0f * env2 * osc_sawtooth(demo_time, NOTE_A/4 - 20 );
-      sample = lp_filter_kick.process(sample);         
+        float onset1 = b * 0.5f;
+        float onset2 = b * 0.25f;
 
-      float env1 = adsr(t_in_bar, ADSR(onset1, 0.5f, 0.5f, 0.05f, 0.2f, 0.05f));  // Lead Synth tune       
-      sample += 0.1f * env1 * osc_square(demo_time, NOTE_AS/4-20);
- 
-      }      
+        float env2 = adsr(t_in_bar, ADSR(onset2, 0.5f, 0.005f, 0.004f, 0.001f,
+                                         0.003f)); // Kick tune
+        sample += 2.0f * env2 * osc_sawtooth(demo_time, NOTE_A / 4 - 20);
+        // sample = lp_filter_kick.process(sample);
+
+        float env1 = adsr(t_in_bar, ADSR(onset1, 0.5f, 0.5f, 0.05f, 0.2f,
+                                         0.05f)); // Lead Synth tune
+        sample += 0.1f * env1 * osc_square(demo_time, NOTE_AS / 4 - 20);
+      }
     }
 
     /// third part // lead + kick + pitchslide // up to 32.0
-    else if(demo_time < 42.0){
+    else if (demo_time < 42.0) {
 
       for (int b = 0; b < 8; ++b) {
-      
-      float onset1 = b * 0.5f;
-      float onset2 = b * 0.25f;
 
-      float env2 = adsr(t_in_bar, ADSR(onset2, 0.5f, 0.005f, 0.004f, 0.001f, 0.003f));  // Kick tune
-      sample += 2.0f * env2 * osc_sawtooth(demo_time, NOTE_A/4 - 20 );
-      sample = lp_filter_kick.process(sample);         
+        float onset1 = b * 0.5f;
+        float onset2 = b * 0.25f;
 
-      float env3 = adsr(t_in_bar, ADSR(onset2, 0.4f, 0.005f, 0.004f, 0.2f, 0.003f)); // Mario 8bit pitch slide 
-      //sample += 0.3f * env3 * osc_square(demo_time, NOTE_DS+0.03*onset2*NOTE_DS );          
-      sample += 0.8f * env3 * osc_sawtooth(demo_time, NOTE_A+4*b );          
+        float env2 = adsr(t_in_bar, ADSR(onset2, 0.5f, 0.005f, 0.004f, 0.001f,
+                                         0.003f)); // Kick tune
+        sample += 2.0f * env2 * osc_sawtooth(demo_time, NOTE_A / 4 - 20);
+        // sample = lp_filter_kick.process(sample);
 
-      float env1 = adsr(t_in_bar, ADSR(onset1, 0.5f, 0.5f, 0.05f, 0.2f, 0.05f));  // Lead Synth tune       
-      sample += 0.1f * env1 * osc_square(demo_time, NOTE_AS/4-20);
-       
+        float env3 = adsr(t_in_bar, ADSR(onset2, 0.4f, 0.005f, 0.004f, 0.2f,
+                                         0.003f)); // Mario 8bit pitch slide
+        // sample += 0.3f * env3 * osc_square(demo_time,
+        // NOTE_DS+0.03*onset2*NOTE_DS );
+        sample += 0.8f * env3 * osc_sawtooth(demo_time, NOTE_A + 4 * b);
+
+        float env1 = adsr(t_in_bar, ADSR(onset1, 0.5f, 0.5f, 0.05f, 0.2f,
+                                         0.05f)); // Lead Synth tune
+        sample += 0.1f * env1 * osc_square(demo_time, NOTE_AS / 4 - 20);
       }
 
-    /// Cental part 1 // lead + kick  // up to 56.0  
+      /// Cental part 1 // lead + kick  // up to 56.0
     } else if (demo_time < 120.0) {
 
-      for (int b = 0; b < 4; ++b) {             
+      for (int b = 0; b < 4; ++b) {
         float onset2 = b * 0.75f;
-        float env_fat = adsr(t_in_bar, ADSR(onset2, 0.4f, 0.005f, 0.05f, 0.3f, 0.2f));  // FAT synth tune
-        sample += 0.4f * env_fat * osc_square(demo_time, NOTE_B/4 - 62 );
+        float env_fat = adsr(t_in_bar, ADSR(onset2, 0.4f, 0.005f, 0.05f, 0.3f,
+                                            0.2f)); // FAT synth tune
+        sample += 0.4f * env_fat * osc_square(demo_time, NOTE_B / 4 - 62);
 
         if (demo_time > 50.0) { // if more than 36.0 !!!!!
-          
-        float onset_kick = b * 0.5f;
-        float env_kick = adsr(t_in_bar, ADSR(onset_kick, 0.75f, 0.005f, 0.005f, 0.002f, 0.005f));  // Kick tune
-        sample += 1.7f * env_kick * osc_sawtooth(demo_time, NOTE_A/4 );
+
+          float onset_kick = b * 0.5f;
+          float env_kick =
+              adsr(t_in_bar, ADSR(onset_kick, 0.75f, 0.005f, 0.005f, 0.002f,
+                                  0.005f)); // Kick tune
+          sample += 1.7f * env_kick * osc_sawtooth(demo_time, NOTE_A / 4);
         }
 
         if (demo_time > 58.0) { // if more than 40.0 !!!!!
-        float onset_noiz = b * 1.0f + 0.25;
-        float env_kick = adsr(t_in_bar, ADSR(onset_noiz, 0.75f, 0.04f, 0.005f, 0.003f, 0.005f));  // noise1
-        sample += 1.0f * env_kick * noise( );
-        }        
+          float onset_noiz = b * 1.0f + 0.25;
+          float env_kick = adsr(t_in_bar, ADSR(onset_noiz, 0.75f, 0.04f, 0.005f,
+                                               0.003f, 0.005f)); // noise1
+          sample += 1.0f * env_kick * noise();
+        }
 
         if (demo_time > 66.0) { // if more than 40.0 !!!!!
-        float onset_crush = b * 1.0f + 0.5;        
-        float env_crush = adsr(t_in_bar, ADSR(onset_crush, 0.075f, 0.04f, 0.05f, 0.03f, 0.005f));  // melodic noise
-        sample += 1.f * env_crush * noise( );
-        sample += 1.f * env_crush * osc_sawtooth(demo_time, NOTE_B/4 );
+          float onset_crush = b * 1.0f + 0.5;
+          float env_crush =
+              adsr(t_in_bar, ADSR(onset_crush, 0.075f, 0.04f, 0.05f, 0.03f,
+                                  0.005f)); // melodic noise
+          sample += 1.f * env_crush * noise();
+          sample += 1.f * env_crush * osc_sawtooth(demo_time, NOTE_B / 4);
         }
 
         if (demo_time > 74.0) { // if more than 40.0 !!!!!
-        float onset_crush1 = b * 1.0f + 0.5;
-        float onset_crush2 = b * 1.0f + 0.6;        
-        
-        float env_crush1 = adsr(t_in_bar, ADSR(onset_crush1, 0.075f, 0.04f, 0.05f, 0.03f, 0.005f));  // melodic noise 2
-        sample += 1.f * env_crush1 * noise( );
-        sample += 1.f * env_crush1 * osc_sawtooth(demo_time, NOTE_B/4 );
-                
-        float env_crush2 = adsr(t_in_bar, ADSR(onset_crush2, 0.075f, 0.04f, 0.05f, 0.03f, 0.005f));  // melodic noise 2
-        sample += 1.f * env_crush2 * noise( );
-        sample += 1.f * env_crush2 * osc_sawtooth(demo_time, NOTE_D/4 );
-        }        
+          float onset_crush1 = b * 1.0f + 0.5;
+          float onset_crush2 = b * 1.0f + 0.6;
 
-        } // end of central part 1
+          float env_crush1 =
+              adsr(t_in_bar, ADSR(onset_crush1, 0.075f, 0.04f, 0.05f, 0.03f,
+                                  0.005f)); // melodic noise 2
+          sample += 1.f * env_crush1 * noise();
+          sample += 1.f * env_crush1 * osc_sawtooth(demo_time, NOTE_B / 4);
 
-      } // end of callback
+          float env_crush2 =
+              adsr(t_in_bar, ADSR(onset_crush2, 0.075f, 0.04f, 0.05f, 0.03f,
+                                  0.005f)); // melodic noise 2
+          sample += 1.f * env_crush2 * noise();
+          sample += 1.f * env_crush2 * osc_sawtooth(demo_time, NOTE_D / 4);
+        }
 
+      } // end of central part 1
 
+    } // end of callback
 
-    
-    // else if (demo_time < 32.0) {
-      
+// else if (demo_time < 32.0) {
 
-    // // Noise
-    // {
-    //   for (int b = 0; b < 8; ++b) {
-    //     float onset = b * 0.25f;
-    //     float rel_time = t_in_bar - onset;
-    //     if (rel_time >= 0.0f && rel_time < 0.08f) {
-    //       float env =
-    //           adsr(t_in_bar, onset, 0.001f, 0.005f, 0.05f, 0.05f, 0.02f);
-    //       float n = noise(); // Random sample
-    //       sample += 0.05f * env * n;
-    //     }
-    //   }
-    // }
+// // Noise
+// {
+//   for (int b = 0; b < 8; ++b) {
+//     float onset = b * 0.25f;
+//     float rel_time = t_in_bar - onset;
+//     if (rel_time >= 0.0f && rel_time < 0.08f) {
+//       float env =
+//           adsr(t_in_bar, onset, 0.001f, 0.005f, 0.05f, 0.05f, 0.02f);
+//       float n = noise(); // Random sample
+//       sample += 0.05f * env * n;
+//     }
+//   }
+// }
 
-    // // Bassline
-    // int bass_index = (int)(t_in_bar / 0.5f) % NUM_BASS_NOTES;
-    // float bass_freq = bassline_freqs[bass_index];
-    // float bass_env =
-    //     adsr(fmodf(t_in_bar, 0.5f), 0.0f, 0.2f, 0.01f, 0.05f, 0.3f, 0.1f);
-    // sample += 0.6f * bass_env * osc_sine(demo_time, bass_freq);
-    #endif // 0
+// // Bassline
+// int bass_index = (int)(t_in_bar / 0.5f) % NUM_BASS_NOTES;
+// float bass_freq = bassline_freqs[bass_index];
+// float bass_env =
+//     adsr(fmodf(t_in_bar, 0.5f), 0.0f, 0.2f, 0.01f, 0.05f, 0.3f, 0.1f);
+// sample += 0.6f * bass_env * osc_sine(demo_time, bass_freq);
+#endif // 0
     sample = clamp(sample, -1.0f, 1.0f);
     d[2 * i] = sample;
     d[2 * i + 1] = sample;
@@ -947,7 +951,7 @@ void draw_real_fft() {
   const float plotW = screenW * 0.2f;
   const float plotH = screenH * 0.1f;
   const float plotX = 2 * pad;
-  const float plotY = screenH - plotH - 2*pad;
+  const float plotY = screenH - plotH - 2 * pad;
   const int ticksX = 5;
   const int ticksY = 4;
 
@@ -978,7 +982,6 @@ void draw_real_fft() {
     float f0 = (i / (float)(fft_size - 1)) * NYQUIST;
     float f1 = ((i + 1) / (float)(fft_size - 1)) * NYQUIST;
 
-
     float p0 = fft_data[i] * fft_data[i];
     float p1 = fft_data[i + 1] * fft_data[i + 1];
     p0 = clamp(p0 / maxPower, 0.0f, .9f);
@@ -996,7 +999,7 @@ void draw_real_fft() {
            RED);
 
   for (int i = 0; i <= ticksX - 1; ++i) {
-    float freq = (i==0)?0.0:log10f((i * NYQUIST / ticksX));
+    float freq = (i == 0) ? 0.0 : log10f((i * NYQUIST / ticksX));
     char label[16];
     snprintf(label, sizeof(label), "%.3fHz", freq);
     float x = plotX + (i / (float)ticksX) * plotW - 10;
@@ -1015,29 +1018,30 @@ void draw_real_fft() {
 static size_t intro(Scene *sc, BumpAllocator *arena, float dur) {
   (void)arena;
   (void)sc;
-  const float W = GetScreenWidth();
-  const float H = GetScreenHeight();
   float actual_time = 0.0;
   constexpr float dt = 1 * 1e-2;
   Vector3 p1{1.0f, 0.0f, 0.0};
   Vector3 p2{0.8f, 0.0f, 0.0};
+  Vector2 *points = arena->allocate<Vector2>(1 << 20);
   size_t point_counter = 0;
-  Vector2 *points = arena->allocate<Vector2>(1 < 20);
   while (!WindowShouldClose() && actual_time < dur) {
+    const float W = GetScreenWidth();
+    const float H = GetScreenHeight();
+    BeginDrawing();
     ClearBackground(BLACK);
     auto msg = intro_texts(actual_time);
     if (!msg) {
       return point_counter;
     }
     int text_width = MeasureText(msg, 100);
-    BeginDrawing();
     for (size_t i = 0; i < 16 / 2; ++i) {
       auto ps1 = Vector3Scale(p1, 24.0f);
       auto ps2 = Vector3Scale(p2, 24.0f);
       Vector2 cand1 = Vector2{ps1.x + (W / 2) + (W / 8), ps1.y + (H / 2)};
       Vector2 cand2 = Vector2{ps2.x + (W / 2) + (W / 8), ps2.y + (H / 2)};
-      points[point_counter++] = cand1;
-      points[point_counter++] = cand2;
+      points[point_counter] = cand1;
+      points[point_counter + 1] = cand2;
+      point_counter += 2;
       p1 = getAttractor(p1, dt / 2);
       p2 = getAttractor(p2, dt / 2);
     }
@@ -1088,17 +1092,19 @@ static int demo_ast(Scene *sc, BumpAllocator *arena, BumpAllocator *music_arena,
 static void post_intro(Scene *sc, BumpAllocator *arena, float dur) {
   (void)arena;
   (void)sc;
-  const float W = GetScreenWidth();
-  const float H = GetScreenHeight();
+
   float actual_time = 0.0;
   constexpr float dt = 1 * 1e-2;
   Vector3 p1{1.3f, 0.0f, 0.0};
   Vector3 p2{0.4f, 0.0f, 0.0};
-  size_t point_counter = 0;
-  Vector2 *points = arena->allocate<Vector2>(1 < 20);
+  Vector2 *points = arena->allocate<Vector2>(1 << 20);
   bool flag = true;
 
+  size_t point_counter = 0;
   while (!WindowShouldClose() && actual_time < dur) {
+    const float W = GetScreenWidth();
+    const float H = GetScreenHeight();
+    BeginDrawing();
     ClearBackground(BLACK);
     // Spawn an AST and then revert actual time back
     if (actual_time > 26 && flag) {
@@ -1108,7 +1114,6 @@ static void post_intro(Scene *sc, BumpAllocator *arena, float dur) {
                          1024 * sizeof(float));
       flag = false;
       demo_ast(sc, arena, &tmp1, 2, 8);
-      ClearBackground(BLACK);
       actual_time = store + GetFrameTime();
       continue;
     }
@@ -1117,8 +1122,6 @@ static void post_intro(Scene *sc, BumpAllocator *arena, float dur) {
       return;
     }
     int text_width = MeasureText(msg, 100);
-    BeginDrawing();
-    ClearBackground(BLACK);
     for (size_t i = 0; i < 16 / 2; ++i) {
       auto ps1 = Vector3Scale(p1, 20.0f);
       auto ps2 = Vector3Scale(p2, 20.0f);
@@ -1293,7 +1296,7 @@ static int demo_ast(Scene *sc, BumpAllocator *arena, BumpAllocator *music_arena,
   float resolution[2] = {(float)screenWidth, (float)screenHeight};
   SetShaderValue(shader, locRes, resolution, SHADER_UNIFORM_VEC2);
   while (!WindowShouldClose() && actual_time < dur) {
-    float t =fmodf(actual_time,AST_INTERVAL);
+    float t = fmodf(actual_time, AST_INTERVAL);
     SetShaderValue(shader, locTime, &t, SHADER_UNIFORM_FLOAT);
     BeginDrawing();
     ClearBackground(WHITE);
@@ -1332,8 +1335,8 @@ static void demo_march(Scene *sc, BumpAllocator *arena,
   int locWrap = GetShaderLocation(shader, "wrap");
   int locOffset = GetShaderLocation(shader, "angleOffset");
   int locAxis = GetShaderLocation(shader, "axis");
-  float offset= fmodf(GetTime() * (2*PI/10.0f), 2*PI);
-  int axis=ncallbacks%7;
+  float offset = fmodf(GetTime() * (2 * PI / 10.0f), 2 * PI);
+  int axis = ncallbacks % 7;
   float resolution[2] = {(float)screenWidth, (float)screenHeight};
   SetShaderValue(shader, locRes, resolution, SHADER_UNIFORM_VEC2);
   SetShaderValue(shader, locTorus, &torus, SHADER_UNIFORM_INT);
@@ -1344,8 +1347,8 @@ static void demo_march(Scene *sc, BumpAllocator *arena,
   SetShaderValue(shader, locOffset, &offset, SHADER_UNIFORM_FLOAT);
   SetShaderValue(shader, locAxis, &axis, SHADER_UNIFORM_INT);
   while (!WindowShouldClose() && actual_time < dur) {
-    float t=GetTime();
-    float ast_t = fmodf(t,AST_INTERVAL);
+    float t = GetTime();
+    float ast_t = fmodf(t, AST_INTERVAL);
     SetShaderValue(shader, locTime, &t, SHADER_UNIFORM_FLOAT);
     SetShaderValue(shader, locAstTime, &ast_t, SHADER_UNIFORM_FLOAT);
     BeginDrawing();
@@ -1366,20 +1369,20 @@ static void demo_march(Scene *sc, BumpAllocator *arena,
 static void outro(Scene *sc, BumpAllocator *arena, float dur, int n) {
   (void)arena;
   (void)sc;
-  const float W = GetScreenWidth();
-  const float H = GetScreenHeight();
+
   float actual_time = 0.0;
   Vector2 *points = reinterpret_cast<Vector2 *>(arena->_memory);
   while (!WindowShouldClose() && actual_time < dur) {
-    
-    const char *msg = "See you next year!";
-    if (actual_time>0.75*dur){
-      msg="GreenHouse";
-    }
-    
-    ClearBackground(BLACK);
-    int text_width = MeasureText(msg, 100);
+    const float W = GetScreenWidth();
+    const float H = GetScreenHeight();
     BeginDrawing();
+    ClearBackground(BLACK);
+    const char *msg = "See you next year!";
+    if (actual_time > 0.75 * dur) {
+      msg = "GreenHouse";
+    }
+
+    int text_width = MeasureText(msg, 100);
     for (int i = n; i > 0; --i) {
       DrawCircleV(points[i], 1, i % 2 == 0 ? RED : BLUE);
     }
@@ -1395,8 +1398,8 @@ static void outro(Scene *sc, BumpAllocator *arena, float dur, int n) {
 }
 //~Scene specific stuff and main demos
 
-static void wait(){
-  while(!IsKeyDown(KEY_SPACE)){
+static void wait() {
+  while (!IsKeyDown(KEY_SPACE)) {
     BeginDrawing();
     ClearBackground(BLACK);
     EndDrawing();
@@ -1445,11 +1448,11 @@ int jump_start() {
   // clang-format off
   SetTraceLogLevel(TraceLogLevel::LOG_NONE);
   InitWindow(screenWidth, screenHeight, "");
-  SetWindowState(FLAG_WINDOW_RESIZABLE | FLAG_WINDOW_UNDECORATED);
-  ToggleFullscreen();
+  SetWindowState(FLAG_WINDOW_RESIZABLE );
+  // ToggleFullscreen();
   
 
-  wait();
+  // wait();
   SetExitKey(KEY_ESCAPE);
   InitAudioDevice();
   AudioStream stream = LoadAudioStream(SR, 32, 2);
