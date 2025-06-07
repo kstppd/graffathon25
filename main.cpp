@@ -450,11 +450,13 @@ static const char *codegen_glsl_ast_marcher(const GenericNode &node) {
                       " precision lowp float;\n"
                       "#define PI 3.14159265\n"
                       "out vec4 FragColor;"
+                      "uniform float angleOffset;"
                       "uniform vec2 resolution;"
                       "uniform float mag;"
                       "uniform float time;"
                       "uniform float ast_time;"
                       "uniform int torus;"
+                      "uniform int axis;"
                       "uniform int color;"
                       "uniform int wrap;"
                       "vec3 sample_ast(vec3 pos) {"
@@ -481,6 +483,10 @@ static const char *codegen_glsl_ast_marcher(const GenericNode &node) {
       "vec3 rotateX(vec3 p, float a) {"
       "    float c = cos(a), s = sin(a);"
       "    return vec3(p.x, c*p.y - s*p.z, s*p.y + c*p.z);"
+      "}"
+      "vec3 rotateAroundAxis(vec3 v, vec3 k, float theta){"
+      "return v * cos(theta) + cross(k, v) * sin(theta)+ k * dot(k, v) * (1.0 "
+      "- cos(theta));"
       "}"
       "float sdfMandel(vec3 point0) {"
       "    const vec3 SCENE_CENTER = vec3(0.0, 0.0, 0.0);"
@@ -566,7 +572,20 @@ static const char *codegen_glsl_ast_marcher(const GenericNode &node) {
       "void main() {"
       "    vec2 uv = (gl_FragCoord.xy * 2.0 - resolution) / resolution.y;"
       "    float camAng = time * 0.3;"
-      "    vec3 ro = vec3(4* sin(camAng), 4* sin(camAng), 2.0 * cos(camAng));"
+      " float speed = 0.5;"
+      "float theta = time * speed;"
+      "vec3 baseRo = vec3(0.0, 0.0, 4.0);"
+      "vec3 raxis=vec3(1,1,0);"
+      "if (axis==0){raxis=vec3(1.0,0.0,0.0);}"
+      "if (axis==1){raxis=vec3(0.0,1.0,0.0);}"
+      "if (axis==2){raxis=vec3(0.0,0.0,1.0);}"
+      "if (axis==3){raxis=vec3(1.0,1.0,0.0);}"
+      "if (axis==4){raxis=vec3(1.0,0.0,1.0);}"
+      "if (axis==5){raxis=vec3(0.0,1.0,1.0);}"
+      "if (axis==6){raxis=vec3(1.0,1.0,1.0);}"
+      "vec3 ro = rotateAroundAxis(baseRo, normalize(raxis), theta);"
+      // "    vec3 ro = vec3(4* sin(camAng), 4* sin(camAng), 2.0 *
+      // cos(camAng));"
       "    vec3 fwd   = normalize(vec3(0.0) - ro);"
       "    vec3 right = normalize(cross(fwd, vec3(0,1,0)));"
       "    vec3 camUp = cross(right, fwd);"
@@ -1160,14 +1179,17 @@ static void demo_march(Scene *sc, BumpAllocator *arena,
   auto glsl_str = codegen_glsl_ast_marcher(ast);
   float actual_time = 0.0;
   Shader shader = LoadShaderFromMemory(0, glsl_str);
-  int locTime, locAstTime, locRes, locMag, locTorus, locColor, locWrap;
-  locRes = GetShaderLocation(shader, "resolution");
-  locTime = GetShaderLocation(shader, "time");
-  locAstTime = GetShaderLocation(shader, "ast_time");
-  locMag = GetShaderLocation(shader, "mag");
-  locTorus = GetShaderLocation(shader, "torus");
-  locColor = GetShaderLocation(shader, "color");
-  locWrap = GetShaderLocation(shader, "wrap");
+  int locRes = GetShaderLocation(shader, "resolution");
+  int locTime = GetShaderLocation(shader, "time");
+  int locAstTime = GetShaderLocation(shader, "ast_time");
+  int locMag = GetShaderLocation(shader, "mag");
+  int locTorus = GetShaderLocation(shader, "torus");
+  int locColor = GetShaderLocation(shader, "color");
+  int locWrap = GetShaderLocation(shader, "wrap");
+  int locOffset = GetShaderLocation(shader, "angleOffset");
+  int locAxis = GetShaderLocation(shader, "axis");
+  float offset= fmodf(GetTime() * (2*PI/10.0f), 2*PI);
+  int axis=ncallbacks%7;
   float resolution[2] = {(float)screenWidth, (float)screenHeight};
   SetShaderValue(shader, locRes, resolution, SHADER_UNIFORM_VEC2);
   SetShaderValue(shader, locTorus, &torus, SHADER_UNIFORM_INT);
@@ -1175,6 +1197,8 @@ static void demo_march(Scene *sc, BumpAllocator *arena,
   SetShaderValue(shader, locColor, &color, SHADER_UNIFORM_INT);
   SetShaderValue(shader, locWrap, &wrap, SHADER_UNIFORM_INT);
   SetShaderValue(shader, locRes, resolution, SHADER_UNIFORM_VEC2);
+  SetShaderValue(shader, locOffset, &offset, SHADER_UNIFORM_FLOAT);
+  SetShaderValue(shader, locAxis, &axis, SHADER_UNIFORM_INT);
   while (!WindowShouldClose() && actual_time < dur) {
     float t=GetTime();
     float ast_t = fmodf(t,AST_INTERVAL);
@@ -1202,8 +1226,13 @@ static void outro(Scene *sc, BumpAllocator *arena, float dur, int n) {
   const float H = GetScreenHeight();
   float actual_time = 0.0;
   Vector2 *points = reinterpret_cast<Vector2 *>(arena->_memory);
-  const char *msg = "See you next year!";
   while (!WindowShouldClose() && actual_time < dur) {
+    
+    const char *msg = "See you next year!";
+    if (actual_time>0.75*dur){
+      msg="GreenHouse";
+    }
+    
     ClearBackground(BLACK);
     int text_width = MeasureText(msg, 100);
     BeginDrawing();
