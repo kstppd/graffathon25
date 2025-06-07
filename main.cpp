@@ -5,11 +5,12 @@
 #include <new>
 #include <raylib.h>
 
-//Global handle
-float* fft_data;
+// Global handle
+float *fft_data;
 size_t fft_size;
-size_t ncallbacks=0;
-//!Global handle
+size_t ncallbacks = 0;
+bool show_fft = false;
+//! Global handle
 
 struct BumpAllocator {
   void *_memory = nullptr;
@@ -68,7 +69,6 @@ struct ComplexNum {
   fft_type_t r;
   fft_type_t i;
 };
-
 
 static constexpr inline bool isPow2(std::unsigned_integral auto val) noexcept {
   return (val & (val - 1)) == 0;
@@ -246,8 +246,8 @@ void tiny_fft(ComplexNum *signal, size_t N) {
   return;
 }
 
-void apply_hann(ComplexNum* signal, size_t N){
-  for (size_t i =0; i<N;++i ){
+void apply_hann(ComplexNum *signal, size_t N) {
+  for (size_t i = 0; i < N; ++i) {
     signal[i].r *= (1.0f / 2.0f) * (1.0f - cosf(2.0f * PI * i / (N - 1)));
   }
 }
@@ -264,11 +264,11 @@ static void callback(void *buffer, unsigned int frames) {
   for (unsigned int i = 0; i < frames; ++i) {
     float sample = 0.0f;
     const float bar_time = fmodf(demo_time, 4.0f);
-    #if 0 
+#if 0 
     // sample = osc_sine(bar_time,10000);
     // sample += osc_sine(bar_time,15000);
     // sample += osc_sine(bar_time,5000);
-    #else
+#else
     // KICK
     for (int b = 0; b < 4; ++b) {
       const float onset = b * 1.0f;
@@ -294,32 +294,32 @@ static void callback(void *buffer, unsigned int frames) {
       sample += 0.12f * env * noise();
     }
 
-    // Output
-    // const float a = alpha(850.0f); 
-    // sample = LPF(sample, prev, a);
-    #endif
+// Output
+// const float a = alpha(850.0f);
+// sample = LPF(sample, prev, a);
+#endif
 
     sample = clamp(sample, -1.0f, 1.0f);
     d[2 * i] = sample;
     d[2 * i + 1] = sample;
-    fft_buffer[i].r=sample;
-    fft_buffer[i].i=0;
-    if (sample>0.1 && !do_fft){
-      do_fft=true;
+    fft_buffer[i].r = sample;
+    fft_buffer[i].i = 0;
+    if (sample > 0.1 && !do_fft) {
+      do_fft = true;
     }
     demo_time += dt;
   }
 
-  if (do_fft){
+  if (do_fft) {
     apply_hann(fft_buffer, frames);
-    tiny_fft(fft_buffer,frames);
+    tiny_fft(fft_buffer, frames);
     for (unsigned int i = 0; i < 1 + frames / 2; ++i) {
       fft_data[i] = fft_buffer[i].r;
     }
-    fft_data[0]=0.0f; //nuke dc
+    fft_data[0] = 0.0f; // nuke dc
     fft_size = 1 + frames / 2;
   }
-  global_arena->release(); 
+  global_arena->release();
   ncallbacks++;
 }
 //~Music stuff
@@ -441,6 +441,141 @@ static char *write_expr(const GenericNode &node, char *out) {
   }
   }
   return out;
+}
+
+static const char *codegen_glsl_ast_marcher(const GenericNode &node) {
+  static char buffer[2 * 65536];
+  char *out = buffer;
+  out += sprintf(out, "#version 330 core\n"
+                      "#define PI 3.14159265\n"
+                      "out vec4 FragColor;"
+                      "uniform vec2 resolution;"
+                      "uniform float mag;"
+                      "uniform float time;"
+                      "uniform int torus;"
+                      "uniform int color;"
+                      "uniform int wrap;"
+                      "vec3 sample_ast(vec3 pos) {"
+                      "    float x = pos.x;"
+                      "    float y = pos.y;"
+                      "    float t = time;"
+                      "    float v = ");
+  out = write_expr(node, out);
+  out += sprintf(
+      out,
+      ";"
+      "    float r = v * 1.2 + 0.0;"
+      "    float g = v * 1.1 + 0.33;"
+      "    float b = v * -1.5 + 0.67;"
+      "    vec3 retval = (color==1)?clamp(vec3(100*r, g, 100*b), 0.0, 1.0)  "
+      ":clamp(vec3(128,128, 128), 0.0, 1.0); "
+      "return retval;"
+      // "return clamp(vec3(100*r, 100*r, 100*r), 0.0, 1.0);"
+      "}"
+      "vec3 rotateY(vec3 p, float a) {"
+      "    float c = cos(a), s = sin(a);"
+      "    return vec3(c*p.x + s*p.z, p.y, -s*p.x + c*p.z);"
+      "}"
+      "vec3 rotateX(vec3 p, float a) {"
+      "    float c = cos(a), s = sin(a);"
+      "    return vec3(p.x, c*p.y - s*p.z, s*p.y + c*p.z);"
+      "}"
+      "vec3 tile(vec3 p, float S) {"
+      "    return mod(p + S*0.5, S) - S*0.5;"
+      "}"
+      "float sdBox(vec3 p, vec3 b) {"
+      "    vec3 d = abs(p) - b;"
+      "    return min(max(d.x, max(d.y, d.z)), 0.0) + length(max(d, 0.0));"
+      "}"
+      "float sdTorus(vec3 p, vec2 t) {"
+      "    vec2 q = vec2(length(p.xz) - t.x, p.y);"
+      "    return length(q) - t.y;"
+      "}"
+      "float sdSphere(vec3 p, float r) {"
+      "    return length(p) - r;"
+      "}"
+      "float smin(float a, float b, float k) {"
+      "    float h = clamp(0.5 + 0.5*(b - a)/k, 0.0, 1.0);"
+      "    return mix(b, a, h) - k*h*(1.0 - h);"
+      "}"
+      "float sceneSDF(vec3 p) {"
+      "    const float tileSize = 2.5;"
+      "    vec3 q =(wrap==1)? tile(p, tileSize):p;"
+      "    q = rotateY(q, time * 1*0.8);"
+      "    q = rotateX(q, time * 1*0.6);"
+      "    float dBox = (torus==0)?sdBox(q, vec3(0.5)):sdTorus(q, "
+      "vec2(0.5,0.25));"
+      "    float dS1  = sdSphere(q + vec3(mag*sin(time*2.0), 0, 0), 0.25);"
+      "    float dS2  = sdSphere(q + vec3(0, mag*cos(time*2.0), 0), 0.25);"
+      "    float dS3  = sdSphere(q + vec3(0, 0, mag*sin(time*2.0)), 0.25);"
+      "    float u1   = smin(dBox, dS1, 0.3);"
+      "    float u2   = smin(dS2, u1, 0.3);"
+      "    return smin(dS3, u2, 0.3);"
+      "}"
+      "vec3 getNormal(vec3 p) {"
+      "    const float epsilon = 1e-4;"
+      "    return normalize(vec3("
+      "        sceneSDF(p + vec3(epsilon,0,0)) - sceneSDF(p - "
+      "vec3(epsilon,0,0)),"
+      "        sceneSDF(p + vec3(0,epsilon,0)) - sceneSDF(p - "
+      "vec3(0,epsilon,0)),"
+      "        sceneSDF(p + vec3(0,0,epsilon)) - sceneSDF(p - "
+      "vec3(0,0,epsilon))"
+      "    ));"
+      "}"
+      "float march(vec3 ro, vec3 rd) {"
+      "    float t = 0.0;"
+      "    for(int i=0;i<100;i++) {"
+      "        vec3 p = ro + rd*t;"
+      "        float d = sceneSDF(p);"
+      "        if(d < 1e-3) break;"
+      "        t += d;"
+      "        if(t > 100.0) break;"
+      "    }"
+      "    return t;"
+      "}"
+      "void main() {"
+      "    vec2 uv = (gl_FragCoord.xy * 2.0 - resolution) / resolution.y;"
+      "    float camAng = time * 0.3;"
+      "    vec3 ro = vec3(4* sin(camAng), 4* sin(camAng), 4.0 * cos(camAng));"
+      "    vec3 fwd   = normalize(vec3(0.0) - ro);"
+      "    vec3 right = normalize(cross(fwd, vec3(0,1,0)));"
+      "    vec3 camUp = cross(right, fwd);"
+      "    vec3 rd    = normalize(fwd + uv.x*right + uv.y*camUp);"
+      "    float t = march(ro, rd);"
+      "    if(t > 80.0) {\n"
+      "        FragColor = vec4(0,0,0,1);\n"
+      "    }\n else {"
+      "        vec3 p       = ro + rd * t;"
+      "        vec3 n       = getNormal(p);"
+      "        vec3 light   = normalize(vec3(1.0, 1.0, 0.7));"
+      "        vec3 viewDir = normalize(ro - p);"
+      "        float ka     = 0.1;"
+      "        float kd     = max(dot(n, light), 0.0);"
+      "        vec3 halfVec = normalize(light + viewDir);"
+      "        float ks     = pow(max(dot(n, halfVec), 0.0), 32.0);"
+      "        const float tileSize = 2.5;"
+      "        vec3 q = (wrap==1)? tile(p, tileSize):p;"
+      "        q = rotateY(q, time * 0.8);"
+      "        q = rotateX(q, time * 0.6);"
+      "        vec3 baseCol = sample_ast(q);"
+      "        vec3 color = baseCol * (ka + kd) + ks;"
+      "        vec3 rd2   = reflect(rd, n);"
+      "        vec3 ro2   = p + n * 1e-3;"
+      "        float t2   = march(ro2, rd2);"
+      "        if(t2 < 50.0) {"
+      "            vec3 p2    = ro2 + rd2 * t2;"
+      "            vec3 n2    = getNormal(p2);"
+      "            float kd2  = max(dot(n2, light), 0.0);"
+      "            vec3 half2 = normalize(light + normalize(ro2 - p2));"
+      "            float ks2  = pow(max(dot(n2, half2), 0.0), 32.0);"
+      "            vec3 col2  = vec3(ka + kd2 + ks2);"
+      "            color      = mix(color, col2, 0.2);"
+      "        }"
+      "        FragColor = vec4(color, 1.0);"
+      "    }"
+      "}");
+  return buffer;
 }
 
 static const char *codegen_glsl_sawtooth(const GenericNode &node) {
@@ -621,23 +756,24 @@ void draw_real_fft() {
   const float pad = 20;
   const float plotW = screenW * 0.2f;
   const float plotH = screenH * 0.1f;
-  const float plotX = 2*pad;
+  const float plotX = 2 * pad;
   const float plotY = screenH - plotH - pad;
   const int ticksX = 5;
   const int ticksY = 4;
- 
-  //Normalize
+
+  // Normalize
   float maxPower = -100000.0;
   for (size_t i = 0; i < fft_size; ++i) {
-    float mag =
-        fft_data[i] * fft_data[i]; 
+    float mag = fft_data[i] * fft_data[i];
     if (mag > maxPower)
       maxPower = mag;
   }
 
-  DrawRectangleRounded(Rectangle{0, plotY-pad, plotW+4*pad, plotH+2*pad},0.4,1000,BLACK);
+  DrawRectangleRounded(
+      Rectangle{0, plotY - pad, plotW + 4 * pad, plotH + 2 * pad}, 0.4, 1000,
+      BLACK);
   DrawRectangleLinesEx((Rectangle){plotX, plotY, plotW, plotH}, 2, RAYWHITE);
-  for (int i = 1; i < ticksX-1; ++i) {
+  for (int i = 1; i < ticksX - 1; ++i) {
     float x = plotX + (i / (float)ticksX) * plotW;
     DrawLine((int)x, (int)plotY, (int)x, (int)(plotY + plotH), DARKGRAY);
   }
@@ -648,7 +784,7 @@ void draw_real_fft() {
   }
 
   // Plot
-  for (size_t i = 0; i < fft_size - 1;i++) {
+  for (size_t i = 0; i < fft_size - 1; i++) {
     float f0 = (i / (float)(fft_size - 1)) * NYQUIST;
     float f1 = ((i + 1) / (float)(fft_size - 1)) * NYQUIST;
     float p0 = fft_data[i] * fft_data[i];
@@ -660,13 +796,14 @@ void draw_real_fft() {
     float y0 = plotY + plotH * (1.0f - p0);
     float y1 = plotY + plotH * (1.0f - p1);
     // DrawCircle(x0,y0,1,GREEN);
-    DrawLineEx(Vector2{x0,y0}, Vector2{x1,y1}, 2.0f, GREEN);
+    DrawLineEx(Vector2{x0, y0}, Vector2{x1, y1}, 2.0f, GREEN);
   }
 
   // Labels
-  DrawText("Fastest Fourier Transform in the North", plotX + 20, plotY - 20, 20, RED);
+  DrawText("Fastest Fourier Transform in the North", plotX + 20, plotY - 20, 20,
+           RED);
 
-  for (int i = 0; i <= ticksX-1; ++i) {
+  for (int i = 0; i <= ticksX - 1; ++i) {
     int freq = (int)(i * NYQUIST / ticksX);
     char label[16];
     snprintf(label, sizeof(label), "%dHz", freq);
@@ -674,11 +811,11 @@ void draw_real_fft() {
     DrawText(label, (int)x, (int)(plotY + plotH + 4), 20, LIGHTGRAY);
   }
 
-  for (int i = 0; i <= ticksY-1; ++i) {
+  for (int i = 0; i <= ticksY - 1; ++i) {
     float p = 1.0f - (i / (float)ticksY);
     char label[16];
     snprintf(label, sizeof(label), "%.1f", p);
-    float y = plotY + i * (plotH / ticksY) - 6 +pad;
+    float y = plotY + i * (plotH / ticksY) - 6 + pad;
     DrawText(label, (int)(plotX - 32), (int)y, 20, LIGHTGRAY);
   }
 }
@@ -716,7 +853,9 @@ static size_t intro(Scene *sc, BumpAllocator *arena, float dur) {
       DrawCircleV(points[i], 1, i % 2 == 0 ? RED : BLUE);
     }
     DrawText(msg, W / 4.0f - 0.5 * text_width, H / 2.0f, FONTSIZE, GOLD);
-    draw_real_fft();
+    if (show_fft) {
+      draw_real_fft();
+    }
     actual_time += GetFrameTime();
     EndDrawing();
   }
@@ -752,7 +891,7 @@ static const char *intro_post1_texts(float t) {
 }
 
 static int demo_ast(Scene *sc, BumpAllocator *arena, BumpAllocator *music_arena,
-                float dur, int depth = 8);
+                    float dur, int depth = 8, bool color = false);
 
 static void post_intro(Scene *sc, BumpAllocator *arena, float dur) {
   (void)arena;
@@ -937,20 +1076,23 @@ static void post_intro(Scene *sc, BumpAllocator *arena, float dur) {
   checkpoint:
     DrawText(msg, W / 4.0f - 0.4 * text_width, 0.175 * H, FONTSIZE, GOLD);
     actual_time += GetFrameTime();
-    draw_real_fft();
+    if (show_fft) {
+      draw_real_fft();
+    }
     EndDrawing();
   }
   return;
 }
 
 static int demo_ast(Scene *sc, BumpAllocator *arena, BumpAllocator *music_arena,
-                float dur, int depth) {
+                    float dur, int depth, bool color) {
   (void)music_arena;
   const int screenWidth = GetScreenWidth();
   const int screenHeight = GetScreenHeight();
   arena->release();
   auto ast = generate_random_ast_arena(depth, arena);
-  auto glsl_str = codegen_glsl_sawtooth_grayscale(ast);
+  auto glsl_str = (color) ? codegen_glsl_sawtooth(ast)
+                          : codegen_glsl_sawtooth_grayscale(ast);
   float actual_time = 0.0;
   Shader shader = LoadShaderFromMemory(0, glsl_str);
   int locTime, locRes;
@@ -959,19 +1101,19 @@ static int demo_ast(Scene *sc, BumpAllocator *arena, BumpAllocator *music_arena,
   float resolution[2] = {(float)screenWidth, (float)screenHeight};
   SetShaderValue(shader, locRes, resolution, SHADER_UNIFORM_VEC2);
   while (!WindowShouldClose() && actual_time < dur) {
-    if (sc->time > AST_INTERVAL) {
-      sc->time = 0.0;
-      arena->release();
-      ast = generate_random_ast_arena(depth, arena);
-      glsl_str = (actual_time >= dur / 2.0f)
-                     ? codegen_glsl_sawtooth(ast)
-                     : codegen_glsl_sawtooth_grayscale(ast);
-      UnloadShader(shader);
-      shader = LoadShaderFromMemory(0, glsl_str);
-      locRes = GetShaderLocation(shader, "resolution");
-      locTime = GetShaderLocation(shader, "time");
-      SetShaderValue(shader, locRes, resolution, SHADER_UNIFORM_VEC2);
-    }
+    // if (sc->time > AST_INTERVAL) {
+    //   sc->time = 0.0;
+    //   arena->release();
+    //   ast = generate_random_ast_arena(depth, arena);
+    //   glsl_str = (actual_time >= dur / 2.0f)
+    //                  ? codegen_glsl_sawtooth(ast)
+    //                  : codegen_glsl_sawtooth_grayscale(ast);
+    //   UnloadShader(shader);
+    //   shader = LoadShaderFromMemory(0, glsl_str);
+    //   locRes = GetShaderLocation(shader, "resolution");
+    //   locTime = GetShaderLocation(shader, "time");
+    //   SetShaderValue(shader, locRes, resolution, SHADER_UNIFORM_VEC2);
+    // }
     SetShaderValue(shader, locTime, &sc->time, SHADER_UNIFORM_FLOAT);
     BeginDrawing();
     ClearBackground(WHITE);
@@ -981,27 +1123,58 @@ static int demo_ast(Scene *sc, BumpAllocator *arena, BumpAllocator *music_arena,
     DrawFPS(0, 0);
     sc->time += GetFrameTime() / 2;
     actual_time += GetFrameTime();
-    draw_real_fft();
+    if (show_fft) {
+      draw_real_fft();
+    }
     EndDrawing();
   }
   UnloadShader(shader);
   return 0;
 }
 
-static void demo_march(Scene *sc, BumpAllocator *arena, BumpAllocator *music_arena,
-                float dur) {
-    const int screenWidth = GetScreenWidth();
-    const int screenHeight = GetScreenHeight();
-    (void)music_arena;
-    arena->release();
-
-
-
-
-
-
-
-    
+static void demo_march(Scene *sc, BumpAllocator *arena,
+                       BumpAllocator *music_arena, float dur, float mag = 1.0,
+                       int torus = 1, int color = 0, int wrap = 0) {
+  (void)music_arena;
+  const int depth = 6;
+  const int screenWidth = GetScreenWidth();
+  const int screenHeight = GetScreenHeight();
+  arena->release();
+  sc->time = 0.0;
+  auto ast = generate_random_ast_arena(depth, arena);
+  auto glsl_str = codegen_glsl_ast_marcher(ast);
+  float actual_time = 0.0;
+  Shader shader = LoadShaderFromMemory(0, glsl_str);
+  int locTime, locRes, locMag, locTorus, locColor, locWrap;
+  locRes = GetShaderLocation(shader, "resolution");
+  locTime = GetShaderLocation(shader, "time");
+  locMag = GetShaderLocation(shader, "mag");
+  locTorus = GetShaderLocation(shader, "torus");
+  locColor = GetShaderLocation(shader, "color");
+  locWrap = GetShaderLocation(shader, "wrap");
+  float resolution[2] = {(float)screenWidth, (float)screenHeight};
+  SetShaderValue(shader, locRes, resolution, SHADER_UNIFORM_VEC2);
+  SetShaderValue(shader, locTorus, &torus, SHADER_UNIFORM_INT);
+  SetShaderValue(shader, locMag, &mag, SHADER_UNIFORM_FLOAT);
+  SetShaderValue(shader, locColor, &color, SHADER_UNIFORM_INT);
+  SetShaderValue(shader, locWrap, &wrap, SHADER_UNIFORM_INT);
+  SetShaderValue(shader, locRes, resolution, SHADER_UNIFORM_VEC2);
+  while (!WindowShouldClose() && actual_time < dur) {
+    SetShaderValue(shader, locTime, &sc->time, SHADER_UNIFORM_FLOAT);
+    BeginDrawing();
+    ClearBackground(WHITE);
+    BeginShaderMode(shader);
+    DrawRectangle(0, 0, screenWidth, screenHeight, WHITE);
+    EndShaderMode();
+    DrawFPS(0, 0);
+    sc->time += GetFrameTime() / 2;
+    actual_time += GetFrameTime();
+    if (show_fft) {
+      draw_real_fft();
+    }
+    EndDrawing();
+  }
+  UnloadShader(shader);
 }
 
 static void outro(Scene *sc, BumpAllocator *arena, float dur, int n) {
@@ -1040,7 +1213,7 @@ int jump_start() {
   constexpr size_t MUSIC_MEMORY_POOL = 1024ul * 1024ul * 1024ul;
   constexpr int screenWidth = 2 * 72 * 16;
   constexpr int screenHeight = 2 * 72 * 9;
-  constexpr float intro_dur = 12.0f;
+  constexpr float intro_dur = 1.0f;
   constexpr float post_intro_1_dur = 31.0f;
   constexpr float demo_dur = 60.0f;
   constexpr float outro_dur = intro_dur;
@@ -1055,7 +1228,8 @@ int jump_start() {
   void *fft_memory = RL_MALLOC(MUSIC_MEMORY_POOL);
   fft_data = (float *)RL_MALLOC(1024ul * 1024ul * sizeof(float));
 
-  if (!scene_memory || !music_memory || !scratch_memory || !scratch_memory || !fft_data) {
+  if (!scene_memory || !music_memory || !scratch_memory || !scratch_memory ||
+      !fft_data) {
     return 1;
   }
 
@@ -1064,10 +1238,10 @@ int jump_start() {
   BumpAllocator scratch_arena(scratch_memory, SCENE_MEMORY_POOL);
   BumpAllocator music_arena(music_memory, MUSIC_MEMORY_POOL);
   BumpAllocator fft_arena(fft_memory, MUSIC_MEMORY_POOL);
-  global_arena=&fft_arena;
+  global_arena = &fft_arena;
 
   // clang-format off
-  SetTraceLogLevel(TraceLogLevel::LOG_NONE);
+  // SetTraceLogLevel(TraceLogLevel::LOG_NONE);
   InitWindow(screenWidth, screenHeight, "");
   // DisableCursor();
   SetExitKey(KEY_ESCAPE);
@@ -1093,9 +1267,27 @@ int jump_start() {
           scene_arena.release();
 
           // Main demo with AST
-          demo_ast(&scene, &scene_arena, &music_arena, demo_dur,6);
-          demo_march(&scene, &scene_arena, &music_arena, demo_dur);
-
+          demo_ast(&scene, &scene_arena, &music_arena, 8,8,false);
+          scene_arena.release();
+          demo_march(&scene, &scene_arena, &music_arena, 8,0.5,0,0,0);
+          scene_arena.release();
+          demo_ast(&scene, &scene_arena, &music_arena, 8,8,false);
+          scene_arena.release();
+          demo_march(&scene, &scene_arena, &music_arena, 8,1.5,0,0,1);
+          scene_arena.release();
+          show_fft=true;
+          demo_ast(&scene, &scene_arena, &music_arena, 8,8,true);
+          scene_arena.release();
+          demo_march(&scene, &scene_arena, &music_arena, 8,1.5,0,1,1);
+          scene_arena.release();
+          demo_ast(&scene, &scene_arena, &music_arena, 8,8,true);
+          scene_arena.release();
+          demo_march(&scene, &scene_arena, &music_arena, 8,1.5,1,1,0);
+          scene_arena.release();
+          demo_ast(&scene, &scene_arena, &music_arena, 8,8,true);
+          scene_arena.release();
+          demo_march(&scene, &scene_arena, &music_arena, 8,1.5,1,1,1);
+          scene_arena.release();
           // Outro
           outro(&scene, &scratch_arena, outro_dur, n);
         
