@@ -86,7 +86,7 @@ static constexpr inline uint32_t nextPow2(uint32_t v) noexcept {
 }
 
 constexpr int FONTSIZE = 75;
-constexpr float AST_INTERVAL = 2.0f;
+constexpr float AST_INTERVAL = 8.0f;
 constexpr float NOTE_C = 261.63;
 constexpr float NOTE_CS = 277.18;
 constexpr float NOTE_D = 293.66;
@@ -444,21 +444,23 @@ static char *write_expr(const GenericNode &node, char *out) {
 }
 
 static const char *codegen_glsl_ast_marcher(const GenericNode &node) {
-  static char buffer[2 * 65536];
+  static char buffer[50 * 65536];
   char *out = buffer;
   out += sprintf(out, "#version 330 core\n"
+                      " precision lowp float;\n"
                       "#define PI 3.14159265\n"
                       "out vec4 FragColor;"
                       "uniform vec2 resolution;"
                       "uniform float mag;"
                       "uniform float time;"
+                      "uniform float ast_time;"
                       "uniform int torus;"
                       "uniform int color;"
                       "uniform int wrap;"
                       "vec3 sample_ast(vec3 pos) {"
                       "    float x = pos.x;"
                       "    float y = pos.y;"
-                      "    float t = time;"
+                      "    float t = ast_time/5.0;"
                       "    float v = ");
   out = write_expr(node, out);
   out += sprintf(
@@ -480,6 +482,31 @@ static const char *codegen_glsl_ast_marcher(const GenericNode &node) {
       "    float c = cos(a), s = sin(a);"
       "    return vec3(p.x, c*p.y - s*p.z, s*p.y + c*p.z);"
       "}"
+      "float sdfMandel(vec3 point0) {"
+      "    const vec3 SCENE_CENTER = vec3(0.0, 0.0, 0.0);"
+      "    const float  BLOB_FACTOR  = 4.0;               "
+      "    const float  SPIKE_ANGLE  = 1.5707/8;     "
+      "    const float  POWER         = 5.0;              "
+      "    const float  BAILOUT       = 2.0;"
+      "    vec3 point = point0 - SCENE_CENTER;"
+      "    vec3  z    = point;"
+      "    float dr   = 1.0;"
+      "    float dist = 0.0;"
+      "    for (int i = 0; i < 4; i++) {"
+      "        dist = length(z);"
+      "        if (dist > BAILOUT) {break;}"
+      "        float theta = acos(z.z / dist) * POWER * BLOB_FACTOR;"
+      "        float phi   = atan(z.y, z.x) * POWER;"
+      "        float distPowM1 = pow(dist, POWER - 1.0);"
+      "        float zr        = distPowM1 * dist;"
+      "        dr = distPowM1 * POWER * dr + 1.0;"
+      "        float sinTh = sin(theta);"
+      "        z = zr * vec3(sinTh * cos(phi),sin(phi + SPIKE_ANGLE) * "
+      "sinTh,cos(theta));"
+      "        z += point;"
+      "        }"
+      "    return 0.5 * log(dist) * dist / dr;"
+      "    }"
       "vec3 tile(vec3 p, float S) {"
       "    return mod(p + S*0.5, S) - S*0.5;"
       "}"
@@ -510,7 +537,9 @@ static const char *codegen_glsl_ast_marcher(const GenericNode &node) {
       "    float dS3  = sdSphere(q + vec3(0, 0, mag*sin(time*2.0)), 0.25);"
       "    float u1   = smin(dBox, dS1, 0.3);"
       "    float u2   = smin(dS2, u1, 0.3);"
-      "    return smin(dS3, u2, 0.3);"
+      "    float u3   = smin(dS3, u2, 0.3);\n"
+      "    float dM = sdfMandel(p);"
+      "    return smin(dM, u3, 0.3);"
       "}"
       "vec3 getNormal(vec3 p) {"
       "    const float epsilon = 1e-4;"
@@ -537,7 +566,7 @@ static const char *codegen_glsl_ast_marcher(const GenericNode &node) {
       "void main() {"
       "    vec2 uv = (gl_FragCoord.xy * 2.0 - resolution) / resolution.y;"
       "    float camAng = time * 0.3;"
-      "    vec3 ro = vec3(4* sin(camAng), 4* sin(camAng), 4.0 * cos(camAng));"
+      "    vec3 ro = vec3(4* sin(camAng), 4* sin(camAng), 2.0 * cos(camAng));"
       "    vec3 fwd   = normalize(vec3(0.0) - ro);"
       "    vec3 right = normalize(cross(fwd, vec3(0,1,0)));"
       "    vec3 camUp = cross(right, fwd);"
@@ -1101,26 +1130,13 @@ static int demo_ast(Scene *sc, BumpAllocator *arena, BumpAllocator *music_arena,
   float resolution[2] = {(float)screenWidth, (float)screenHeight};
   SetShaderValue(shader, locRes, resolution, SHADER_UNIFORM_VEC2);
   while (!WindowShouldClose() && actual_time < dur) {
-    // if (sc->time > AST_INTERVAL) {
-    //   sc->time = 0.0;
-    //   arena->release();
-    //   ast = generate_random_ast_arena(depth, arena);
-    //   glsl_str = (actual_time >= dur / 2.0f)
-    //                  ? codegen_glsl_sawtooth(ast)
-    //                  : codegen_glsl_sawtooth_grayscale(ast);
-    //   UnloadShader(shader);
-    //   shader = LoadShaderFromMemory(0, glsl_str);
-    //   locRes = GetShaderLocation(shader, "resolution");
-    //   locTime = GetShaderLocation(shader, "time");
-    //   SetShaderValue(shader, locRes, resolution, SHADER_UNIFORM_VEC2);
-    // }
-    SetShaderValue(shader, locTime, &sc->time, SHADER_UNIFORM_FLOAT);
+    float t =fmodf(actual_time,AST_INTERVAL);
+    SetShaderValue(shader, locTime, &t, SHADER_UNIFORM_FLOAT);
     BeginDrawing();
     ClearBackground(WHITE);
     BeginShaderMode(shader);
     DrawRectangle(0, 0, screenWidth, screenHeight, WHITE);
     EndShaderMode();
-    DrawFPS(0, 0);
     sc->time += GetFrameTime() / 2;
     actual_time += GetFrameTime();
     if (show_fft) {
@@ -1136,18 +1152,18 @@ static void demo_march(Scene *sc, BumpAllocator *arena,
                        BumpAllocator *music_arena, float dur, float mag = 1.0,
                        int torus = 1, int color = 0, int wrap = 0) {
   (void)music_arena;
-  const int depth = 6;
+  const int depth = 8;
   const int screenWidth = GetScreenWidth();
   const int screenHeight = GetScreenHeight();
   arena->release();
-  sc->time = 0.0;
   auto ast = generate_random_ast_arena(depth, arena);
   auto glsl_str = codegen_glsl_ast_marcher(ast);
   float actual_time = 0.0;
   Shader shader = LoadShaderFromMemory(0, glsl_str);
-  int locTime, locRes, locMag, locTorus, locColor, locWrap;
+  int locTime, locAstTime, locRes, locMag, locTorus, locColor, locWrap;
   locRes = GetShaderLocation(shader, "resolution");
   locTime = GetShaderLocation(shader, "time");
+  locAstTime = GetShaderLocation(shader, "ast_time");
   locMag = GetShaderLocation(shader, "mag");
   locTorus = GetShaderLocation(shader, "torus");
   locColor = GetShaderLocation(shader, "color");
@@ -1160,13 +1176,15 @@ static void demo_march(Scene *sc, BumpAllocator *arena,
   SetShaderValue(shader, locWrap, &wrap, SHADER_UNIFORM_INT);
   SetShaderValue(shader, locRes, resolution, SHADER_UNIFORM_VEC2);
   while (!WindowShouldClose() && actual_time < dur) {
-    SetShaderValue(shader, locTime, &sc->time, SHADER_UNIFORM_FLOAT);
+    float t=GetTime();
+    float ast_t = fmodf(t,AST_INTERVAL);
+    SetShaderValue(shader, locTime, &t, SHADER_UNIFORM_FLOAT);
+    SetShaderValue(shader, locAstTime, &ast_t, SHADER_UNIFORM_FLOAT);
     BeginDrawing();
     ClearBackground(WHITE);
     BeginShaderMode(shader);
     DrawRectangle(0, 0, screenWidth, screenHeight, WHITE);
     EndShaderMode();
-    DrawFPS(0, 0);
     sc->time += GetFrameTime() / 2;
     actual_time += GetFrameTime();
     if (show_fft) {
@@ -1195,11 +1213,22 @@ static void outro(Scene *sc, BumpAllocator *arena, float dur, int n) {
     n -= 16;
     DrawText(msg, W / 4.0f - 0.5 * text_width, H / 2.0f, FONTSIZE, GOLD);
     actual_time += GetFrameTime();
+    if (show_fft) {
+      draw_real_fft();
+    }
     EndDrawing();
   }
   arena->release();
 }
 //~Scene specific stuff and main demos
+
+static void wait(){
+  while(!IsKeyDown(KEY_SPACE)){
+    BeginDrawing();
+    ClearBackground(BLACK);
+    EndDrawing();
+  }
+}
 
 /*
 NOTES
@@ -1213,7 +1242,7 @@ int jump_start() {
   constexpr size_t MUSIC_MEMORY_POOL = 1024ul * 1024ul * 1024ul;
   constexpr int screenWidth = 2 * 72 * 16;
   constexpr int screenHeight = 2 * 72 * 9;
-  constexpr float intro_dur = 1.0f;
+  constexpr float intro_dur = 12.0f;
   constexpr float post_intro_1_dur = 31.0f;
   constexpr float demo_dur = 60.0f;
   constexpr float outro_dur = intro_dur;
@@ -1221,7 +1250,7 @@ int jump_start() {
   //~Settings
   srand(seed);
 
-  // Pool
+  // Pools
   void *scene_memory = RL_MALLOC(SCENE_MEMORY_POOL);
   void *scratch_memory = RL_MALLOC(SCENE_MEMORY_POOL);
   void *music_memory = RL_MALLOC(MUSIC_MEMORY_POOL);
@@ -1241,22 +1270,22 @@ int jump_start() {
   global_arena = &fft_arena;
 
   // clang-format off
-  // SetTraceLogLevel(TraceLogLevel::LOG_NONE);
+  SetTraceLogLevel(TraceLogLevel::LOG_NONE);
   InitWindow(screenWidth, screenHeight, "");
-  // DisableCursor();
+  wait();
+  DisableCursor();
   SetExitKey(KEY_ESCAPE);
   InitAudioDevice();
-  SetAudioStreamBufferSizeDefault(1<<10);
   AudioStream stream = LoadAudioStream(SR, 32, 2);
   AttachAudioStreamProcessor(stream, callback);
   PlayAudioStream(stream);  
   SetTargetFPS(FPS);
-   
           // Setup Scene
           Scene scene{.img = GenImageColor(screenWidth, screenHeight, BLACK),
                       .tex = {},
                       .time = 0.0};
           scene.tex = LoadTextureFromImage(scene.img);
+          
           // Intro
           auto n = intro(&scene, &scene_arena, intro_dur);
           memcpy(scratch_memory, scene_memory, n * sizeof(Vector2));
@@ -1267,27 +1296,35 @@ int jump_start() {
           scene_arena.release();
 
           // Main demo with AST
-          demo_ast(&scene, &scene_arena, &music_arena, 8,8,false);
+          constexpr  int depth = 8;
+          demo_ast(&scene, &scene_arena, &music_arena, 8,depth,false);
           scene_arena.release();
           demo_march(&scene, &scene_arena, &music_arena, 8,0.5,0,0,0);
           scene_arena.release();
-          demo_ast(&scene, &scene_arena, &music_arena, 8,8,false);
+          demo_ast(&scene, &scene_arena, &music_arena, 8,depth,false);
           scene_arena.release();
-          demo_march(&scene, &scene_arena, &music_arena, 8,1.5,0,0,1);
+          demo_march(&scene, &scene_arena, &music_arena, 15,1.0,0,0,1);
           scene_arena.release();
           show_fft=true;
-          demo_ast(&scene, &scene_arena, &music_arena, 8,8,true);
+          demo_ast(&scene, &scene_arena, &music_arena, 8,depth,true);
           scene_arena.release();
-          demo_march(&scene, &scene_arena, &music_arena, 8,1.5,0,1,1);
+          demo_march(&scene, &scene_arena, &music_arena, 8,1.0,0,1,1);
           scene_arena.release();
-          demo_ast(&scene, &scene_arena, &music_arena, 8,8,true);
+          demo_ast(&scene, &scene_arena, &music_arena, 8,depth,true);
           scene_arena.release();
-          demo_march(&scene, &scene_arena, &music_arena, 8,1.5,1,1,0);
+          demo_march(&scene, &scene_arena, &music_arena, 8,1.0,1,1,0);
           scene_arena.release();
-          demo_ast(&scene, &scene_arena, &music_arena, 8,8,true);
+          demo_ast(&scene, &scene_arena, &music_arena, 8,depth,true);
           scene_arena.release();
-          demo_march(&scene, &scene_arena, &music_arena, 8,1.5,1,1,1);
+          demo_march(&scene, &scene_arena, &music_arena, 8,1.0,1,1,1);
           scene_arena.release();
+          for (int i=1; i< 8; ++i){
+            demo_ast(&scene, &scene_arena, &music_arena, 2,depth,false);
+            demo_march(&scene, &scene_arena, &music_arena, 2,1.0,0,1,1);
+            scene.time+=GetFrameTime();
+            demo_march(&scene, &scene_arena, &music_arena, 2,1.0,1,1,1);
+            scene_arena.release();
+          }
           // Outro
           outro(&scene, &scratch_arena, outro_dur, n);
         
