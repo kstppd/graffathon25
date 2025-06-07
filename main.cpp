@@ -332,7 +332,7 @@ static void callback(void *buffer, unsigned int frames) {
     }
 
     /// 2nd part // lead + kick // up to 24.0
-    else if (demo_time < 24.0) {  
+    else if (demo_time < 31.0) {  
       for (int b = 0; b < 8; ++b) {
         
       float onset1 = b * 0.5f;
@@ -349,7 +349,7 @@ static void callback(void *buffer, unsigned int frames) {
     }
 
     /// third part // lead + kick + pitchslide // up to 32.0
-    else if(demo_time < 32.0){
+    else if(demo_time < 42.0){
 
       for (int b = 0; b < 8; ++b) {
       
@@ -370,34 +370,34 @@ static void callback(void *buffer, unsigned int frames) {
       }
 
     /// Cental part 1 // lead + kick  // up to 56.0  
-    } else if (demo_time < 68.0) {
+    } else if (demo_time < 120.0) {
 
       for (int b = 0; b < 4; ++b) {             
         float onset2 = b * 0.75f;
         float env_fat = adsr(t_in_bar, ADSR(onset2, 0.4f, 0.005f, 0.05f, 0.3f, 0.2f));  // FAT synth tune
         sample += 0.4f * env_fat * osc_square(demo_time, NOTE_B/4 - 62 );
 
-        if (demo_time > 36.0) { // if more than 36.0 !!!!!
+        if (demo_time > 50.0) { // if more than 36.0 !!!!!
           
         float onset_kick = b * 0.5f;
         float env_kick = adsr(t_in_bar, ADSR(onset_kick, 0.75f, 0.005f, 0.005f, 0.002f, 0.005f));  // Kick tune
         sample += 1.7f * env_kick * osc_sawtooth(demo_time, NOTE_A/4 );
         }
 
-        if (demo_time > 44.0) { // if more than 40.0 !!!!!
+        if (demo_time > 58.0) { // if more than 40.0 !!!!!
         float onset_noiz = b * 1.0f + 0.25;
         float env_kick = adsr(t_in_bar, ADSR(onset_noiz, 0.75f, 0.04f, 0.005f, 0.003f, 0.005f));  // noise1
         sample += 1.0f * env_kick * noise( );
         }        
 
-        if (demo_time > 50.0) { // if more than 40.0 !!!!!
+        if (demo_time > 66.0) { // if more than 40.0 !!!!!
         float onset_crush = b * 1.0f + 0.5;        
         float env_crush = adsr(t_in_bar, ADSR(onset_crush, 0.075f, 0.04f, 0.05f, 0.03f, 0.005f));  // melodic noise
         sample += 1.f * env_crush * noise( );
         sample += 1.f * env_crush * osc_sawtooth(demo_time, NOTE_B/4 );
         }
 
-        if (demo_time > 56.0) { // if more than 40.0 !!!!!
+        if (demo_time > 74.0) { // if more than 40.0 !!!!!
         float onset_crush1 = b * 1.0f + 0.5;
         float onset_crush2 = b * 1.0f + 0.6;        
         
@@ -1473,30 +1473,29 @@ int jump_start() {
 
           // Main demo with AST
           constexpr  int depth = 8;
-          demo_ast(&scene, &scene_arena, &music_arena, 8,depth,false);
+          demo_ast(&scene, &scene_arena, &music_arena, 2,depth,false);
           scene_arena.release();
           demo_march(&scene, &scene_arena, &music_arena, 8,0.5,0,0,0);
           scene_arena.release();
-          demo_ast(&scene, &scene_arena, &music_arena, 8,depth,false);
+          demo_ast(&scene, &scene_arena, &music_arena, 2,depth,false);
           scene_arena.release();
-          demo_march(&scene, &scene_arena, &music_arena, 15,1.0,0,0,1);
+          demo_march(&scene, &scene_arena, &music_arena, 16,1.0,0,0,1);
           scene_arena.release();
           show_fft=true;
-          demo_ast(&scene, &scene_arena, &music_arena, 8,depth,true);
+          demo_ast(&scene, &scene_arena, &music_arena, 2,depth,true);
           scene_arena.release();
-          demo_march(&scene, &scene_arena, &music_arena, 8,1.0,0,1,1);
+          demo_march(&scene, &scene_arena, &music_arena, 4,1.0,0,1,1);
           scene_arena.release();
-          demo_ast(&scene, &scene_arena, &music_arena, 8,depth,true);
+          demo_ast(&scene, &scene_arena, &music_arena, 2,depth,true);
           scene_arena.release();
-          demo_march(&scene, &scene_arena, &music_arena, 8,1.0,1,1,0);
+          demo_march(&scene, &scene_arena, &music_arena, 4,1.0,1,1,0);
           scene_arena.release();
-          demo_ast(&scene, &scene_arena, &music_arena, 8,depth,true);
+          demo_ast(&scene, &scene_arena, &music_arena, 2,depth,true);
           scene_arena.release();
-          demo_march(&scene, &scene_arena, &music_arena, 8,1.0,1,1,1);
+          demo_march(&scene, &scene_arena, &music_arena, 4,1.0,1,1,1);
           scene_arena.release();
-          for (int i=1; i< 8; ++i){
+          for (int i=1; i< 3; ++i){
             demo_ast(&scene, &scene_arena, &music_arena, 2,depth,false);
-            demo_march(&scene, &scene_arena, &music_arena, 2,1.0,0,1,1);
             scene.time+=GetFrameTime();
             demo_march(&scene, &scene_arena, &music_arena, 2,1.0,1,1,1);
             scene_arena.release();
