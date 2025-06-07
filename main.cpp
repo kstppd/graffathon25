@@ -1,10 +1,90 @@
+#include "raylib/src/raylib.h"
 #include <cmath>
+#include <cstdint>
 #include <cstdio>
-#include <math.h>
 #include <new>
 #include <raylib.h>
 
+//Global handle
+float* fft_data;
+size_t fft_size;
+size_t ncallbacks=0;
+//!Global handle
+
+struct BumpAllocator {
+  void *_memory = nullptr;
+  size_t _sp = 0;
+  size_t _totalBytes = 0;
+  size_t _allocBytes = 0;
+  size_t _freeBytes = 0;
+
+  BumpAllocator(const BumpAllocator &) = delete;
+  BumpAllocator &operator=(const BumpAllocator &) = delete;
+  BumpAllocator(BumpAllocator &&) = delete;
+  BumpAllocator &operator=(BumpAllocator &&) = delete;
+
+  BumpAllocator(void *buffer, size_t bytes)
+      : _memory(buffer), _sp(0), _totalBytes(bytes), _allocBytes(0),
+        _freeBytes(bytes) {}
+
+  template <typename T> T *allocate(size_t count) {
+    if (count == 0) {
+      return nullptr;
+    }
+    const size_t bytesToAllocate = count * sizeof(T);
+    const size_t alignment = fmax(alignof(T), size_t(8));
+
+    size_t baseAddress = reinterpret_cast<size_t>((char *)_memory + _sp);
+    size_t padding = (baseAddress % alignment == 0)
+                         ? 0
+                         : (alignment - baseAddress % alignment);
+    size_t totalBytes = padding + bytesToAllocate;
+
+    if (_sp + totalBytes > _totalBytes) {
+      abort();
+      return nullptr;
+    }
+
+    void *ptr = (char *)_memory + _sp + padding;
+    _sp += totalBytes;
+    _allocBytes += totalBytes;
+    _freeBytes -= totalBytes;
+    return reinterpret_cast<T *>(ptr);
+  }
+  void release() {
+    _sp = 0;
+    _allocBytes = 0;
+    _freeBytes = _totalBytes;
+  }
+};
+
+BumpAllocator *global_arena;
+
 // MUSIC Stuff
+using fft_type_t = float;
+struct ComplexNum {
+  fft_type_t real() { return r; }
+  fft_type_t img() { return i; }
+  fft_type_t r;
+  fft_type_t i;
+};
+
+
+static constexpr inline bool isPow2(std::unsigned_integral auto val) noexcept {
+  return (val & (val - 1)) == 0;
+}
+
+static constexpr inline uint32_t nextPow2(uint32_t v) noexcept {
+  v--;
+  v |= v >> 1;
+  v |= v >> 2;
+  v |= v >> 4;
+  v |= v >> 8;
+  v |= v >> 16;
+  v++;
+  return v;
+}
+
 constexpr int FONTSIZE = 75;
 constexpr float AST_INTERVAL = 2.0f;
 constexpr float NOTE_C = 261.63;
@@ -22,6 +102,7 @@ constexpr float NOTE_AS = 466.16;
 constexpr float NOTE_B = 493.88;
 constexpr float SEMITONE = 1.05946;
 constexpr float SR = 48000.0f;
+constexpr float NYQUIST = SR / 2;
 
 constexpr float alpha(float cutoff_freq) {
   const float rc = 1.0f / (2.0f * M_PI * cutoff_freq);
@@ -36,8 +117,7 @@ static constexpr float osc_sine(float t, float fundamental) {
 
 // https://en.wikipedia.org/wiki/Square_wave_(waveform)
 static constexpr float osc_square(float t, float fundamental) {
-  const float nyquist = SR * 0.5f;
-  const int max_harmonic = (int)(nyquist / fundamental);
+  const int max_harmonic = (int)(NYQUIST / fundamental);
   float value = 0.0f;
   for (int k = 1; k <= max_harmonic; ++k) {
     value += sinf(2.0f * M_PI * (2.0f * k - 1.0f) * fundamental * t) /
@@ -133,17 +213,62 @@ static float wrap(float x, float minVal, float maxVal) {
   return minVal + fmodf((x - minVal + range), range);
 }
 
+void tiny_fft(ComplexNum *signal, size_t N) {
+
+  // We done
+  if (N <= 1) {
+    return;
+  }
+
+  // Split into even and odd samples
+  ComplexNum *even = global_arena->allocate<ComplexNum>(N / 2);
+  ComplexNum *odd = global_arena->allocate<ComplexNum>(N / 2);
+  for (size_t i = 0; i < N / 2; ++i) {
+    even[i] = signal[2 * i];
+    odd[i] = signal[2 * i + 1];
+  }
+
+  // Recursion hell
+  tiny_fft(even, N / 2);
+  tiny_fft(odd, N / 2);
+
+  for (size_t k = 0; k < N / 2; ++k) {
+    const float angle = -2.0f * PI * k / N;
+    const float wr = cosf(angle);
+    const float wi = sinf(angle);
+    const float t_real = wr * odd[k].r - wi * odd[k].i;
+    const float t_imag = wr * odd[k].i + wi * odd[k].r;
+    signal[k].r = even[k].r + t_real;
+    signal[k].i = even[k].i + t_imag;
+    signal[k + N / 2].r = even[k].r - t_real;
+    signal[k + N / 2].i = even[k].i - t_imag;
+  }
+  return;
+}
+
+void apply_hann(ComplexNum* signal, size_t N){
+  for (size_t i =0; i<N;++i ){
+    signal[i].r *= (1.0f / 2.0f) * (1.0f - cosf(2.0f * PI * i / (N - 1)));
+  }
+}
+
 // IVAN
 static void callback(void *buffer, unsigned int frames) {
   static float demo_time = 0.0f;
   static float dt = 1.0f / SR;
   static float prev = 0;
   float *const d = reinterpret_cast<float *>(buffer);
+  bool do_fft = false;
+  ComplexNum *fft_buffer = global_arena->allocate<ComplexNum>(frames);
 
   for (unsigned int i = 0; i < frames; ++i) {
     float sample = 0.0f;
     const float bar_time = fmodf(demo_time, 4.0f);
-
+    #if 0 
+    // sample = osc_sine(bar_time,10000);
+    // sample += osc_sine(bar_time,15000);
+    // sample += osc_sine(bar_time,5000);
+    #else
     // KICK
     for (int b = 0; b < 4; ++b) {
       const float onset = b * 1.0f;
@@ -170,66 +295,36 @@ static void callback(void *buffer, unsigned int frames) {
     }
 
     // Output
-    const float a = alpha(850.0f); 
-    sample = LPF(sample, prev, a);
+    // const float a = alpha(850.0f); 
+    // sample = LPF(sample, prev, a);
+    #endif
 
     sample = clamp(sample, -1.0f, 1.0f);
     d[2 * i] = sample;
     d[2 * i + 1] = sample;
+    fft_buffer[i].r=sample;
+    fft_buffer[i].i=0;
+    if (sample>0.1 && !do_fft){
+      do_fft=true;
+    }
     demo_time += dt;
   }
+
+  if (do_fft){
+    apply_hann(fft_buffer, frames);
+    tiny_fft(fft_buffer,frames);
+    for (unsigned int i = 0; i < 1 + frames / 2; ++i) {
+      fft_data[i] = fft_buffer[i].r;
+    }
+    fft_data[0]=0.0f; //nuke dc
+    fft_size = 1 + frames / 2;
+  }
+  global_arena->release(); 
+  ncallbacks++;
 }
 //~Music stuff
 
-// AST and Memory Pool
-struct BumpAllocator {
-  void *_memory = nullptr;
-  size_t _sp = 0;
-  size_t _totalBytes = 0;
-  size_t _allocBytes = 0;
-  size_t _freeBytes = 0;
-
-  BumpAllocator(const BumpAllocator &) = delete;
-  BumpAllocator &operator=(const BumpAllocator &) = delete;
-  BumpAllocator(BumpAllocator &&) = delete;
-  BumpAllocator &operator=(BumpAllocator &&) = delete;
-
-  BumpAllocator(void *buffer, size_t bytes)
-      : _memory(buffer), _sp(0), _totalBytes(bytes), _allocBytes(0),
-        _freeBytes(bytes) {}
-
-  template <typename T> T *allocate(size_t count) {
-    if (count == 0) {
-      return nullptr;
-    }
-    const size_t bytesToAllocate = count * sizeof(T);
-    const size_t alignment = fmax(alignof(T), size_t(8));
-
-    size_t baseAddress = reinterpret_cast<size_t>((char *)_memory + _sp);
-    size_t padding = (baseAddress % alignment == 0)
-                         ? 0
-                         : (alignment - baseAddress % alignment);
-    size_t totalBytes = padding + bytesToAllocate;
-
-    if (_sp + totalBytes > _totalBytes) {
-      abort();
-      return nullptr;
-    }
-
-    void *ptr = (char *)_memory + _sp + padding;
-    _sp += totalBytes;
-    _allocBytes += totalBytes;
-    _freeBytes -= totalBytes;
-    return reinterpret_cast<T *>(ptr);
-  }
-
-  void release() {
-    _sp = 0;
-    _allocBytes = 0;
-    _freeBytes = _totalBytes;
-  }
-};
-
+// AST Stuff
 struct Scene {
   Image img;
   Texture2D tex;
@@ -518,6 +613,76 @@ static const char *intro_texts(float t) {
   return nullptr;
 }
 
+void draw_real_fft() {
+  if (!fft_data || fft_size == 0)
+    return;
+  const float screenW = (float)GetScreenWidth();
+  const float screenH = (float)GetScreenHeight();
+  const float pad = 20;
+  const float plotW = screenW * 0.2f;
+  const float plotH = screenH * 0.1f;
+  const float plotX = 2*pad;
+  const float plotY = screenH - plotH - pad;
+  const int ticksX = 5;
+  const int ticksY = 4;
+ 
+  //Normalize
+  float maxPower = -100000.0;
+  for (size_t i = 0; i < fft_size; ++i) {
+    float mag =
+        fft_data[i] * fft_data[i]; 
+    if (mag > maxPower)
+      maxPower = mag;
+  }
+
+  DrawRectangleRounded(Rectangle{0, plotY-pad, plotW+4*pad, plotH+2*pad},0.4,1000,BLACK);
+  DrawRectangleLinesEx((Rectangle){plotX, plotY, plotW, plotH}, 2, RAYWHITE);
+  for (int i = 1; i < ticksX-1; ++i) {
+    float x = plotX + (i / (float)ticksX) * plotW;
+    DrawLine((int)x, (int)plotY, (int)x, (int)(plotY + plotH), DARKGRAY);
+  }
+
+  for (int i = 1; i < ticksY; ++i) {
+    float y = plotY + (i / (float)ticksY) * plotH;
+    DrawLine((int)plotX, (int)y, (int)(plotX + plotW), (int)y, DARKGRAY);
+  }
+
+  // Plot
+  for (size_t i = 0; i < fft_size - 1;i++) {
+    float f0 = (i / (float)(fft_size - 1)) * NYQUIST;
+    float f1 = ((i + 1) / (float)(fft_size - 1)) * NYQUIST;
+    float p0 = fft_data[i] * fft_data[i];
+    float p1 = fft_data[i + 1] * fft_data[i + 1];
+    p0 = clamp(p0 / maxPower, 0.0f, .9f);
+    p1 = clamp(p1 / maxPower, 0.0f, .9f);
+    float x0 = plotX + (f0 / NYQUIST) * plotW;
+    float x1 = plotX + (f1 / NYQUIST) * plotW;
+    float y0 = plotY + plotH * (1.0f - p0);
+    float y1 = plotY + plotH * (1.0f - p1);
+    // DrawCircle(x0,y0,1,GREEN);
+    DrawLineEx(Vector2{x0,y0}, Vector2{x1,y1}, 2.0f, GREEN);
+  }
+
+  // Labels
+  DrawText("Fastest Fourier Transform in the North", plotX + 20, plotY - 20, 20, RED);
+
+  for (int i = 0; i <= ticksX-1; ++i) {
+    int freq = (int)(i * NYQUIST / ticksX);
+    char label[16];
+    snprintf(label, sizeof(label), "%dHz", freq);
+    float x = plotX + (i / (float)ticksX) * plotW - 10;
+    DrawText(label, (int)x, (int)(plotY + plotH + 4), 20, LIGHTGRAY);
+  }
+
+  for (int i = 0; i <= ticksY-1; ++i) {
+    float p = 1.0f - (i / (float)ticksY);
+    char label[16];
+    snprintf(label, sizeof(label), "%.1f", p);
+    float y = plotY + i * (plotH / ticksY) - 6 +pad;
+    DrawText(label, (int)(plotX - 32), (int)y, 20, LIGHTGRAY);
+  }
+}
+
 static size_t intro(Scene *sc, BumpAllocator *arena, float dur) {
   (void)arena;
   (void)sc;
@@ -551,6 +716,7 @@ static size_t intro(Scene *sc, BumpAllocator *arena, float dur) {
       DrawCircleV(points[i], 1, i % 2 == 0 ? RED : BLUE);
     }
     DrawText(msg, W / 4.0f - 0.5 * text_width, H / 2.0f, FONTSIZE, GOLD);
+    draw_real_fft();
     actual_time += GetFrameTime();
     EndDrawing();
   }
@@ -771,6 +937,7 @@ static void post_intro(Scene *sc, BumpAllocator *arena, float dur) {
   checkpoint:
     DrawText(msg, W / 4.0f - 0.4 * text_width, 0.175 * H, FONTSIZE, GOLD);
     actual_time += GetFrameTime();
+    draw_real_fft();
     EndDrawing();
   }
   return;
@@ -814,6 +981,7 @@ static int demo_ast(Scene *sc, BumpAllocator *arena, BumpAllocator *music_arena,
     DrawFPS(0, 0);
     sc->time += GetFrameTime() / 2;
     actual_time += GetFrameTime();
+    draw_real_fft();
     EndDrawing();
   }
   UnloadShader(shader);
@@ -826,6 +994,14 @@ static void demo_march(Scene *sc, BumpAllocator *arena, BumpAllocator *music_are
     const int screenHeight = GetScreenHeight();
     (void)music_arena;
     arena->release();
+
+
+
+
+
+
+
+    
 }
 
 static void outro(Scene *sc, BumpAllocator *arena, float dur, int n) {
@@ -876,7 +1052,10 @@ int jump_start() {
   void *scene_memory = RL_MALLOC(SCENE_MEMORY_POOL);
   void *scratch_memory = RL_MALLOC(SCENE_MEMORY_POOL);
   void *music_memory = RL_MALLOC(MUSIC_MEMORY_POOL);
-  if (!scene_memory || !music_memory || !scratch_memory) {
+  void *fft_memory = RL_MALLOC(MUSIC_MEMORY_POOL);
+  fft_data = (float *)RL_MALLOC(1024ul * 1024ul * sizeof(float));
+
+  if (!scene_memory || !music_memory || !scratch_memory || !scratch_memory || !fft_data) {
     return 1;
   }
 
@@ -884,6 +1063,8 @@ int jump_start() {
   BumpAllocator scene_arena(scene_memory, SCENE_MEMORY_POOL);
   BumpAllocator scratch_arena(scratch_memory, SCENE_MEMORY_POOL);
   BumpAllocator music_arena(music_memory, MUSIC_MEMORY_POOL);
+  BumpAllocator fft_arena(fft_memory, MUSIC_MEMORY_POOL);
+  global_arena=&fft_arena;
 
   // clang-format off
   SetTraceLogLevel(TraceLogLevel::LOG_NONE);
@@ -913,7 +1094,7 @@ int jump_start() {
 
           // Main demo with AST
           demo_ast(&scene, &scene_arena, &music_arena, demo_dur,6);
-          // demo_march(&scene, &scene_arena, &music_arena, demo_dur);
+          demo_march(&scene, &scene_arena, &music_arena, demo_dur);
 
           // Outro
           outro(&scene, &scratch_arena, outro_dur, n);
@@ -932,6 +1113,12 @@ int jump_start() {
   }
   if (scratch_memory) {
     free(scratch_memory);
+  }
+  if (fft_memory) {
+    free(fft_memory);
+  }
+  if (fft_data) {
+    free(fft_data);
   }
   return 0;
 }
