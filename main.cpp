@@ -1,51 +1,43 @@
-#include <raylib.h>
-#include <thread>
 #include <cmath>
 #include <cstdio>
 #include <math.h>
-#define FONTSIZE 75
+#include <new>
+#include <raylib.h>
 
-// Digital SYNTH Stuff
-#define MAX_SAMPLES 512
-#define MAX_SAMPLES_PER_UPDATE 4096
-#define AST_INTERVAL 2.0f
-#define NOTE_C 261.63
-#define NOTE_CS 277.18
-#define NOTE_D 293.66
-#define NOTE_DS 311.13
-#define NOTE_E 329.63
-#define NOTE_Eb 311.13f
-#define NOTE_F 349.23
-#define NOTE_FS 369.99
-#define NOTE_G 392.00
-#define NOTE_GS 415.30
-#define NOTE_A 440.00
-#define NOTE_AS 466.16
-#define NOTE_B 493.88
-#define SEMITONE 1.05946
-
-constexpr int NUM_BASS_NOTES = 4;
-constexpr float bassline_freqs[NUM_BASS_NOTES] = {NOTE_C / 4, NOTE_D / 4,
-                                                  NOTE_Eb / 4, NOTE_F / 4};
+// MUSIC Stuff
+constexpr int FONTSIZE = 75;
+constexpr float MAX_SAMPLES = 512;
+constexpr float MAX_SAMPLES_PER_UPDATE = 4096;
+constexpr float AST_INTERVAL = 2.0f;
+constexpr float NOTE_C = 261.63;
+constexpr float NOTE_CS = 277.18;
+constexpr float NOTE_D = 293.66;
+constexpr float NOTE_DS = 311.13;
+constexpr float NOTE_E = 329.63;
+constexpr float NOTE_Eb = 311.13f;
+constexpr float NOTE_F = 349.23;
+constexpr float NOTE_FS = 369.99;
+constexpr float NOTE_G = 392.00;
+constexpr float NOTE_GS = 415.30;
+constexpr float NOTE_A = 440.00;
+constexpr float NOTE_AS = 466.16;
+constexpr float NOTE_B = 493.88;
+constexpr float SEMITONE = 1.05946;
 constexpr float SR = 48000.0f;
-static inline float next_octave(float note) { return note * 2.0f; }
-static inline float prev_octave(float note) { return note * 2.0f; }
-template <typename T> T static clamp(const T &value, const T min, const T max);
 
-float alpha(float cutoff_freq) {
-  float rc = 1.0f / (2.0f * M_PI * cutoff_freq);
-  float dt = 1.0f / SR;
+constexpr float alpha(float cutoff_freq) {
+  const float rc = 1.0f / (2.0f * M_PI * cutoff_freq);
+  const float dt = 1.0f / SR;
   return dt / (rc + dt);
 }
 
 inline float noise() { return 2.0f * ((rand() / (float)RAND_MAX) - 0.5f); }
-
-static float osc_sine(float t, float fundamental) {
+static constexpr float osc_sine(float t, float fundamental) {
   return sinf(2.0f * M_PI * fundamental * t);
 }
 
 // https://en.wikipedia.org/wiki/Square_wave_(waveform)
-static float osc_square(float t, float fundamental) {
+static constexpr float osc_square(float t, float fundamental) {
   const float nyquist = SR * 0.5f;
   const int max_harmonic = (int)(nyquist / fundamental);
   float value = 0.0f;
@@ -58,7 +50,7 @@ static float osc_square(float t, float fundamental) {
 }
 
 // https://en.wikipedia.org/wiki/Sawtooth_wave
-static float osc_sawtooth(float t, float fundamental) {
+static constexpr float osc_sawtooth(float t, float fundamental) {
   const float nyquist = SR * 0.5f;
   const int max_harmonic = (int)(nyquist / fundamental);
   float value = 0.0f;
@@ -69,44 +61,46 @@ static float osc_sawtooth(float t, float fundamental) {
   return value;
 }
 
-float lfo(float input, float &prev_output, float alpha) {
+static constexpr float LPF(float input, float &prev_output, float alpha) {
   prev_output = prev_output + alpha * (input - prev_output);
   return prev_output;
 }
+
 struct ADSR {
+  ADSR(float o, float l, float a, float d, float s, float r)
+      : onset(o), note_length(l), A(a), D(d), S(s), R(r) {}
   float onset;
   float note_length;
-  float attack;
-  float decay;
-  float sustain;
-  float release;
+  float A;
+  float D;
+  float S;
+  float R;
 };
 
-float adsr(float t, float onset, float note_length, float attack, float decay,
-           float sustain, float release) {
-  float dt = t - onset;
-  if (dt < 0)
-    return 0;
-  if (dt < attack)
-    return dt / attack;
-  if (dt < attack + decay)
-    return 1.0f - (1.0f - sustain) * ((dt - attack) / decay);
-  if (dt < note_length)
-    return sustain;
-  if (dt < note_length + release)
-    return sustain * (1.0f - (dt - note_length) / release);
-  return 0;
+static constexpr float adsr(float t, const ADSR &env) {
+  float dt = t - env.onset;
+  if (dt < 0.0f)
+    return 0.0f;
+  if (dt < env.A)
+    return dt / env.A;
+  if (dt < env.A + env.D)
+    return 1.0f - (1.0f - env.S) * ((dt - env.A) / env.D);
+  if (dt < env.note_length)
+    return env.S;
+  if (dt < env.note_length + env.R)
+    return env.S * (1.0f - (dt - env.note_length) / env.R);
+  return 0.0f;
 }
 
-inline Vector3 Vector3Scale(Vector3 a, float s) {
+static Vector3 Vector3Scale(Vector3 a, float s) {
   return Vector3{a.x * s, a.y * s, a.z * s};
 }
 
-inline float Vector3Length(Vector3 a) {
+static inline float Vector3Length(Vector3 a) {
   return sqrtf(a.x * a.x + a.y * a.y + a.z * a.z);
 }
 
-static void *memcpy(void *dest, const void *src, unsigned int n) {
+constexpr static void *memcpy(void *dest, const void *src, unsigned int n) {
   char *d = (char *)dest;
   const char *s = (const char *)src;
   for (unsigned int i = 0; i < n; i++) {
@@ -115,7 +109,7 @@ static void *memcpy(void *dest, const void *src, unsigned int n) {
   return dest;
 }
 
-static char *strncpy(char *dest, const char *src, unsigned int n) {
+constexpr static char *strncpy(char *dest, const char *src, unsigned int n) {
   unsigned int i = 0;
   for (; i < n && src[i] != '\0'; i++) {
     dest[i] = src[i];
@@ -126,6 +120,70 @@ static char *strncpy(char *dest, const char *src, unsigned int n) {
   return dest;
 }
 
+float static clamp(const float &value, const float min, const float max) {
+  if (value < min) {
+    return min;
+  }
+  if (value > max) {
+    return max;
+  }
+  return value;
+}
+
+static float wrap(float x, float minVal, float maxVal) {
+  float range = maxVal - minVal;
+  return minVal + fmodf((x - minVal + range), range);
+}
+
+// IVAN
+static void callback(void *buffer, unsigned int frames) {
+  static float demo_time = 0.0f;
+  static float dt = 1.0f / SR;
+  static float prev = 0;
+  float *const d = reinterpret_cast<float *>(buffer);
+
+  for (unsigned int i = 0; i < frames; ++i) {
+    float sample = 0.0f;
+    const float bar_time = fmodf(demo_time, 4.0f);
+
+    // KICK
+    for (int b = 0; b < 4; ++b) {
+      const float onset = b * 1.0f;
+      const float env =
+          adsr(bar_time, ADSR(onset, 0.12f, 0.01f, 0.08f, 0.3f, 0.08f));
+      sample += 0.9f * env * osc_sine(demo_time, 60.0f);
+    }
+
+    // SNARE
+    for (int b = 0; b < 2; ++b) {
+      const float onset = 1.0f + b * 2.0f;
+      const float pitch_mod = 1.0f + 0.5f * (demo_time * 0.25f);
+      const float env =
+          adsr(bar_time, ADSR(onset, 0.08f, 0.01f, 0.05f, 0.25f, 0.05f));
+      sample += 0.5f * env * noise() * pitch_mod;
+    }
+
+    // HIGH HAT
+    for (int b = 0; b < 16; ++b) {
+      const float onset = b * 0.25f;
+      const float env =
+          adsr(bar_time, ADSR(onset, 0.015f, 0.002f, 0.01f, 0.06f, 0.01f));
+      sample += 0.12f * env * noise();
+    }
+
+    // Output
+    const float a = alpha(850.0f); // moderate LPF
+    sample = LPF(sample, prev, a);
+
+    sample = clamp(sample, -1.0f, 1.0f);
+    d[2 * i] = sample;
+    d[2 * i + 1] = sample;
+    demo_time += dt;
+  }
+}
+//~Music stuff
+
+// AST and Memory Pool
 struct BumpAllocator {
   void *_memory = nullptr;
   size_t _sp = 0;
@@ -171,11 +229,6 @@ struct BumpAllocator {
     _sp = 0;
     _allocBytes = 0;
     _freeBytes = _totalBytes;
-  }
-  template <typename F> void destroy_with(F &&f) {
-    if (_memory) {
-      f(_memory);
-    }
   }
 };
 
@@ -408,7 +461,9 @@ static GenericNode generate_random_ast_arena(int depth, BumpAllocator *arena) {
     return generate_random_ast_arena(depth, arena);
   }
 }
+//~AST and Memory Pool
 
+// Randoms stuff
 template <typename T, typename F>
 static constexpr auto rk4(T yn, T tn, T h, F &&f) -> T {
   const auto k1 = f(tn, yn);
@@ -443,23 +498,9 @@ static Vector3 getAttractor(Vector3 r0, float dt) {
   r1.z = rk4(r0.z, t, dt, f3);
   return r1;
 }
+//~Random stuff
 
-struct MusicLorenzOscillator {
-  Vector3 pos = {2.0f, 0.0f, 0.0f};
-  float dt = 1e-5;
-  float step() {
-    pos = getAttractor(pos, dt);
-    return Vector3Length(pos);
-  }
-
-  Vector3 stepv() {
-    pos = getAttractor(pos, dt);
-    return pos;
-  }
-};
-
-MusicLorenzOscillator music_osc{};
-
+// Scene specific stuff and main demos
 static const char *intro_texts(float t) {
   if (t < 2.0) {
     return "Graffathon 2025!";
@@ -565,17 +606,17 @@ static void post_intro(Scene *sc, BumpAllocator *arena, float dur) {
   while (!WindowShouldClose() && actual_time < dur) {
     ClearBackground(BLACK);
     // Spawn an AST and then revert actual time back
-    // if (actual_time > 26 && flag) {
-    //   float store = actual_time;
-    //   // Create a Pool from my Pool -> Insane!
-    //   BumpAllocator tmp1(arena->allocate<float>(1024 * 1024),
-    //                      1024 * sizeof(float));
-    //   flag = false;
-    //   demo(sc, arena, &tmp1, 2, 8);
-    //   ClearBackground(BLACK);
-    //   actual_time = store + GetFrameTime();
-    //   continue;
-    // }
+    if (actual_time > 26 && flag) {
+      float store = actual_time;
+      // Create a Pool from my Pool -> Insane!
+      BumpAllocator tmp1(arena->allocate<float>(1024 * 1024),
+                         1024 * sizeof(float));
+      flag = false;
+      demo(sc, arena, &tmp1, 2, 8);
+      ClearBackground(BLACK);
+      actual_time = store + GetFrameTime();
+      continue;
+    }
     auto msg = intro_post1_texts(actual_time);
     if (!msg) {
       return;
@@ -803,101 +844,7 @@ static void outro(Scene *sc, BumpAllocator *arena, float dur, int n) {
   }
   arena->release();
 }
-
-template <typename T> T static clamp(const T &value, const T min, const T max) {
-  if (value < min) {
-    return min;
-  }
-  if (value > max) {
-    return max;
-  }
-  return value;
-}
-
-float wrap(float x, float minVal, float maxVal) {
-  float range = maxVal - minVal;
-  return minVal + fmodf((x - minVal + range), range);
-}
-
-static float demo_time = 0.0f;
-static float dt = 1.0f / SR;
-
-//IVAN
-void callback(void *buffer, unsigned int frames) {
-
-  float *d = reinterpret_cast<float *>(buffer);
-  float a = alpha(300);
-
-  for (unsigned int i = 0; i < frames; ++i) {
-    static float prev = 0;
-    float t_in_bar = fmodf(demo_time, 2.0f);
-    float sample = 0.0f;
-
-    if (demo_time < 5.0) {
-      // Kick
-      float onset = 0.0f;
-      float env = adsr(t_in_bar, onset, 0.3f, 0.01f, 0.1f, 0.4f, 0.1f);
-      sample += 1.0 * env * osc_sine(demo_time, NOTE_A);
-
-      // Synth
-      float onset1 = 0.5f;
-      float env1 = adsr(t_in_bar, onset1, 0.3f, 0.01f, 0.1f, 0.2f, 0.1f);
-      sample += 1.0 * env1 * osc_sine(demo_time, NOTE_B);
-      float onset2 = 0.9f;
-      float env2 = adsr(t_in_bar, onset2, 0.3f, 0.01f, 0.1f, 0.2f, 0.1f);
-      sample += 1.0 * env2 * osc_sine(demo_time, NOTE_D);
-
-    } else if (demo_time < 100.0) {
-      // Kick
-      for (int b = 0; b < 2; ++b) {
-        float onset = b * 1.0f;
-        float env = adsr(t_in_bar, onset, 0.3f, 0.04f, 0.1f, 0.2f, 0.1f);
-        sample += env * osc_sine(demo_time, NOTE_CS);
-      }
-    }
-
-    // // Snare
-    // for (int b = 0; b < 8; ++b) {
-    //   float onset = b * 0.25f;
-    //   float env = adsr(t_in_bar, onset, 0.15f, 0.005f, 0.05f, 0.2f, 0.05f);
-    //   sample += 0.5f * env * osc_square(demo_time, NOTE_C );
-    // }
-
-    // // Snare
-    // for (int b = 0; b < 2; ++b) {
-    //   float onset = 1.5f + b * 1.0f;
-    //   float env = adsr(t_in_bar, onset, 0.15f, 0.005f, 0.05f, 0.2f, 0.05f);
-    //   sample += 0.5f * env * osc_square(demo_time, NOTE_C );
-    // }
-
-    // // Noise
-    // {
-    //   for (int b = 0; b < 8; ++b) {
-    //     float onset = b * 0.25f;
-    //     float rel_time = t_in_bar - onset;
-    //     if (rel_time >= 0.0f && rel_time < 0.08f) {
-    //       float env =
-    //           adsr(t_in_bar, onset, 0.001f, 0.005f, 0.05f, 0.05f, 0.02f);
-    //       float n = noise(); // Random sample
-    //       sample += 0.05f * env * n;
-    //     }
-    //   }
-    // }
-
-    // // Bassline
-    // int bass_index = (int)(t_in_bar / 0.5f) % NUM_BASS_NOTES;
-    // float bass_freq = bassline_freqs[bass_index];
-    // float bass_env =
-    //     adsr(fmodf(t_in_bar, 0.5f), 0.0f, 0.2f, 0.01f, 0.05f, 0.3f, 0.1f);
-    // sample += 0.6f * bass_env * osc_sine(demo_time, bass_freq);
-
-    sample = lfo(sample, prev, a);
-    sample = clamp(sample, -1.0f, 1.0f);
-    d[2 * i] = sample;
-    d[2 * i + 1] = sample;
-    demo_time += dt;
-  }
-}
+//~Scene specific stuff and main demos
 
 /*
 NOTES
@@ -955,7 +902,7 @@ int jump_start() {
           memcpy(scratch_memory, scene_memory, n * sizeof(Vector2));
           scene_arena.release();
 
-         // Post Intro 1
+          // Post Intro 1
           post_intro(&scene, &scene_arena, post_intro_1_dur);
           scene_arena.release();
 
