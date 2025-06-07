@@ -9,7 +9,7 @@
 float *fft_data;
 size_t fft_size;
 size_t ncallbacks = 0;
-bool show_fft = false;
+bool show_fft = true;
 //! Global handle
 
 struct BumpAllocator {
@@ -70,7 +70,7 @@ struct ComplexNum {
   fft_type_t i;
 };
 
-static constexpr inline bool isPow2(std::unsigned_integral auto val) noexcept {
+static constexpr inline bool isPow2(unsigned int  val) noexcept {
   return (val & (val - 1)) == 0;
 }
 
@@ -101,7 +101,7 @@ constexpr float NOTE_A = 440.00;
 constexpr float NOTE_AS = 466.16;
 constexpr float NOTE_B = 493.88;
 constexpr float SEMITONE = 1.05946;
-constexpr float SR = 48000.0f;
+constexpr float SR = 44100.0f;
 constexpr float NYQUIST = SR / 2;
 
 constexpr float alpha(float cutoff_freq) {
@@ -138,6 +138,53 @@ static constexpr float osc_sawtooth(float t, float fundamental) {
   value *= -2.0f / M_PI;
   return value;
 }
+
+
+struct LowPassFilter {
+    float prev = 0.0f;
+    float alpha = 0.1f;
+
+    LowPassFilter(float cutoff) {
+        setCutoff(cutoff);
+    }
+
+    void setCutoff(float cutoff) {
+        float rc = 1.0f / (2.0f * M_PI * cutoff);
+        float dt = 1.0f / SR;
+        alpha = dt / (rc + dt);
+    }
+
+    float process(float input) {
+        prev = prev + alpha * (input - prev);
+        return prev;
+    }
+};
+
+
+struct HighPassFilter {
+    float prev_input = 0.0f;
+    float prev_output = 0.0f;
+    float alpha = 0.1f;
+
+    HighPassFilter(float cutoff) {
+        setCutoff(cutoff);
+    }
+
+    void setCutoff(float cutoff) {
+        float rc = 1.0f / (2.0f * M_PI * cutoff);
+        float dt = 1.0f / SR;
+        alpha = rc / (rc + dt);
+    }
+
+    float process(float input) {
+        float output = alpha * (prev_output + input - prev_input);
+        prev_input = input;
+        prev_output = output;
+        return output;
+    }
+};
+
+
 
 static constexpr float LPF(float input, float &prev_output, float alpha) {
   prev_output = prev_output + alpha * (input - prev_output);
@@ -252,6 +299,9 @@ void apply_hann(ComplexNum *signal, size_t N) {
   }
 }
 
+static HighPassFilter hp_filter_lead(100.0f);  // Set your cutoff in Hz
+static LowPassFilter lp_filter_kick(400.0f);   // Set your cutoff in Hz
+
 // IVAN
 static void callback(void *buffer, unsigned int frames) {
   static float demo_time = 0.0f;
@@ -262,43 +312,135 @@ static void callback(void *buffer, unsigned int frames) {
   ComplexNum *fft_buffer = global_arena->allocate<ComplexNum>(frames);
 
   for (unsigned int i = 0; i < frames; ++i) {
+    float t_in_bar = fmodf(demo_time, 2.0f);
     float sample = 0.0f;
-    const float bar_time = fmodf(demo_time, 4.0f);
-#if 0 
-    // sample = osc_sine(bar_time,10000);
-    // sample += osc_sine(bar_time,15000);
-    // sample += osc_sine(bar_time,5000);
-#else
-    // KICK
-    for (int b = 0; b < 4; ++b) {
-      const float onset = b * 1.0f;
-      const float env =
-          adsr(bar_time, ADSR(onset, 0.12f, 0.01f, 0.08f, 0.3f, 0.08f));
-      sample += 0.9f * env * osc_sine(demo_time, 60.0f);
+
+    // Check out bar
+    // if (demo_time < 8.0) {               
+    //   }      
+    #if 0
+    sample=osc_sine(demo_time, 5000);
+    #else
+    /// first part // lead only  // up to 8.0
+    if (demo_time < 8.0) {            
+      for (int b = 0; b < 8; ++b) {
+        float onset1 = b * 0.5f;
+        float env1 = adsr(t_in_bar, ADSR(onset1, 0.5f, 0.5f, 0.05f, 0.2f, 0.05f));  // Lead Synth tune       
+        sample += 0.1f * env1 * osc_square(demo_time, NOTE_AS/4-20);
+        //sample = hp_filter_lead.process(sample);         
+      }      
     }
 
-    // SNARE
-    for (int b = 0; b < 2; ++b) {
-      const float onset = 1.0f + b * 2.0f;
-      const float pitch_mod = 1.0f + 0.5f * (demo_time * 0.25f);
-      const float env =
-          adsr(bar_time, ADSR(onset, 0.08f, 0.01f, 0.05f, 0.25f, 0.05f));
-      sample += 0.5f * env * noise() * pitch_mod;
+    /// 2nd part // lead + kick // up to 24.0
+    else if (demo_time < 24.0) {  
+      for (int b = 0; b < 8; ++b) {
+        
+      float onset1 = b * 0.5f;
+      float onset2 = b * 0.25f;
+
+      float env2 = adsr(t_in_bar, ADSR(onset2, 0.5f, 0.005f, 0.004f, 0.001f, 0.003f));  // Kick tune
+      sample += 2.0f * env2 * osc_sawtooth(demo_time, NOTE_A/4 - 20 );
+      sample = lp_filter_kick.process(sample);         
+
+      float env1 = adsr(t_in_bar, ADSR(onset1, 0.5f, 0.5f, 0.05f, 0.2f, 0.05f));  // Lead Synth tune       
+      sample += 0.1f * env1 * osc_square(demo_time, NOTE_AS/4-20);
+ 
+      }      
     }
 
-    // HIGH HAT
-    for (int b = 0; b < 16; ++b) {
-      const float onset = b * 0.25f;
-      const float env =
-          adsr(bar_time, ADSR(onset, 0.015f, 0.002f, 0.01f, 0.06f, 0.01f));
-      sample += 0.12f * env * noise();
-    }
+    /// third part // lead + kick + pitchslide // up to 32.0
+    else if(demo_time < 32.0){
 
-// Output
-// const float a = alpha(850.0f);
-// sample = LPF(sample, prev, a);
-#endif
+      for (int b = 0; b < 8; ++b) {
+      
+      float onset1 = b * 0.5f;
+      float onset2 = b * 0.25f;
 
+      float env2 = adsr(t_in_bar, ADSR(onset2, 0.5f, 0.005f, 0.004f, 0.001f, 0.003f));  // Kick tune
+      sample += 2.0f * env2 * osc_sawtooth(demo_time, NOTE_A/4 - 20 );
+      sample = lp_filter_kick.process(sample);         
+
+      float env3 = adsr(t_in_bar, ADSR(onset2, 0.4f, 0.005f, 0.004f, 0.2f, 0.003f)); // Mario 8bit pitch slide 
+      //sample += 0.3f * env3 * osc_square(demo_time, NOTE_DS+0.03*onset2*NOTE_DS );          
+      sample += 0.8f * env3 * osc_sawtooth(demo_time, NOTE_A+4*b );          
+
+      float env1 = adsr(t_in_bar, ADSR(onset1, 0.5f, 0.5f, 0.05f, 0.2f, 0.05f));  // Lead Synth tune       
+      sample += 0.1f * env1 * osc_square(demo_time, NOTE_AS/4-20);
+       
+      }
+
+    /// Cental part 1 // lead + kick  // up to 56.0  
+    } else if (demo_time < 68.0) {
+
+      for (int b = 0; b < 4; ++b) {             
+        float onset2 = b * 0.75f;
+        float env_fat = adsr(t_in_bar, ADSR(onset2, 0.4f, 0.005f, 0.05f, 0.3f, 0.2f));  // FAT synth tune
+        sample += 0.4f * env_fat * osc_square(demo_time, NOTE_B/4 - 62 );
+
+        if (demo_time > 36.0) { // if more than 36.0 !!!!!
+          
+        float onset_kick = b * 0.5f;
+        float env_kick = adsr(t_in_bar, ADSR(onset_kick, 0.75f, 0.005f, 0.005f, 0.002f, 0.005f));  // Kick tune
+        sample += 1.7f * env_kick * osc_sawtooth(demo_time, NOTE_A/4 );
+        }
+
+        if (demo_time > 44.0) { // if more than 40.0 !!!!!
+        float onset_noiz = b * 1.0f + 0.25;
+        float env_kick = adsr(t_in_bar, ADSR(onset_noiz, 0.75f, 0.04f, 0.005f, 0.003f, 0.005f));  // noise1
+        sample += 1.0f * env_kick * noise( );
+        }        
+
+        if (demo_time > 50.0) { // if more than 40.0 !!!!!
+        float onset_crush = b * 1.0f + 0.5;        
+        float env_crush = adsr(t_in_bar, ADSR(onset_crush, 0.075f, 0.04f, 0.05f, 0.03f, 0.005f));  // melodic noise
+        sample += 1.f * env_crush * noise( );
+        sample += 1.f * env_crush * osc_sawtooth(demo_time, NOTE_B/4 );
+        }
+
+        if (demo_time > 56.0) { // if more than 40.0 !!!!!
+        float onset_crush1 = b * 1.0f + 0.5;
+        float onset_crush2 = b * 1.0f + 0.6;        
+        
+        float env_crush1 = adsr(t_in_bar, ADSR(onset_crush1, 0.075f, 0.04f, 0.05f, 0.03f, 0.005f));  // melodic noise 2
+        sample += 1.f * env_crush1 * noise( );
+        sample += 1.f * env_crush1 * osc_sawtooth(demo_time, NOTE_B/4 );
+                
+        float env_crush2 = adsr(t_in_bar, ADSR(onset_crush2, 0.075f, 0.04f, 0.05f, 0.03f, 0.005f));  // melodic noise 2
+        sample += 1.f * env_crush2 * noise( );
+        sample += 1.f * env_crush2 * osc_sawtooth(demo_time, NOTE_D/4 );
+        }        
+
+        } // end of central part 1
+
+      } // end of callback
+
+
+
+    
+    // else if (demo_time < 32.0) {
+      
+
+    // // Noise
+    // {
+    //   for (int b = 0; b < 8; ++b) {
+    //     float onset = b * 0.25f;
+    //     float rel_time = t_in_bar - onset;
+    //     if (rel_time >= 0.0f && rel_time < 0.08f) {
+    //       float env =
+    //           adsr(t_in_bar, onset, 0.001f, 0.005f, 0.05f, 0.05f, 0.02f);
+    //       float n = noise(); // Random sample
+    //       sample += 0.05f * env * n;
+    //     }
+    //   }
+    // }
+
+    // // Bassline
+    // int bass_index = (int)(t_in_bar / 0.5f) % NUM_BASS_NOTES;
+    // float bass_freq = bassline_freqs[bass_index];
+    // float bass_env =
+    //     adsr(fmodf(t_in_bar, 0.5f), 0.0f, 0.2f, 0.01f, 0.05f, 0.3f, 0.1f);
+    // sample += 0.6f * bass_env * osc_sine(demo_time, bass_freq);
+    #endif // 0
     sample = clamp(sample, -1.0f, 1.0f);
     d[2 * i] = sample;
     d[2 * i + 1] = sample;
@@ -805,7 +947,7 @@ void draw_real_fft() {
   const float plotW = screenW * 0.2f;
   const float plotH = screenH * 0.1f;
   const float plotX = 2 * pad;
-  const float plotY = screenH - plotH - pad;
+  const float plotY = screenH - plotH - 2*pad;
   const int ticksX = 5;
   const int ticksY = 4;
 
@@ -835,6 +977,8 @@ void draw_real_fft() {
   for (size_t i = 0; i < fft_size - 1; i++) {
     float f0 = (i / (float)(fft_size - 1)) * NYQUIST;
     float f1 = ((i + 1) / (float)(fft_size - 1)) * NYQUIST;
+
+
     float p0 = fft_data[i] * fft_data[i];
     float p1 = fft_data[i + 1] * fft_data[i + 1];
     p0 = clamp(p0 / maxPower, 0.0f, .9f);
@@ -852,9 +996,9 @@ void draw_real_fft() {
            RED);
 
   for (int i = 0; i <= ticksX - 1; ++i) {
-    int freq = (int)(i * NYQUIST / ticksX);
+    float freq = (i==0)?0.0:log10f((i * NYQUIST / ticksX));
     char label[16];
-    snprintf(label, sizeof(label), "%dHz", freq);
+    snprintf(label, sizeof(label), "%.3fHz", freq);
     float x = plotX + (i / (float)ticksX) * plotW - 10;
     DrawText(label, (int)x, (int)(plotY + plotH + 4), 20, LIGHTGRAY);
   }
@@ -1301,8 +1445,11 @@ int jump_start() {
   // clang-format off
   SetTraceLogLevel(TraceLogLevel::LOG_NONE);
   InitWindow(screenWidth, screenHeight, "");
+  SetWindowState(FLAG_WINDOW_RESIZABLE | FLAG_WINDOW_UNDECORATED);
+  ToggleFullscreen();
+  
+
   wait();
-  DisableCursor();
   SetExitKey(KEY_ESCAPE);
   InitAudioDevice();
   AudioStream stream = LoadAudioStream(SR, 32, 2);
