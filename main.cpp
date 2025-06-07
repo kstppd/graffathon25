@@ -172,7 +172,7 @@ static void callback(void *buffer, unsigned int frames) {
     }
 
     // Output
-    const float a = alpha(850.0f); // moderate LPF
+    const float a = alpha(850.0f); 
     sample = LPF(sample, prev, a);
 
     sample = clamp(sample, -1.0f, 1.0f);
