@@ -246,11 +246,6 @@ float static clamp(const float &value, const float min, const float max) {
   return value;
 }
 
-static float wrap(float x, float minVal, float maxVal) {
-  float range = maxVal - minVal;
-  return minVal + fmodf((x - minVal + range), range);
-}
-
 void tiny_fft(ComplexNum *signal, size_t N) {
 
   // We done
@@ -323,7 +318,7 @@ static void callback(void *buffer, unsigned int frames) {
                                          0.003f)); // Kick tune
         sample += 2.0f * env2 * osc_sawtooth(demo_time, NOTE_A / 4 - 20);
         // sample = lp_filter_kick.process(sample);
-        sample=LPF(sample,prev, alpha(400.0f));
+        sample = LPF(sample, prev, alpha(400.0f));
         float env1 = adsr(bar_time, ADSR(onset1, 0.5f, 0.5f, 0.05f, 0.2f,
                                          0.05f)); // Lead Synth tune
         sample += 0.1f * env1 * osc_square(demo_time, NOTE_AS / 4 - 20);
@@ -335,7 +330,7 @@ static void callback(void *buffer, unsigned int frames) {
         float env2 = adsr(bar_time, ADSR(onset2, 0.5f, 0.005f, 0.004f, 0.001f,
                                          0.003f)); // Kick tune
         sample += 2.0f * env2 * osc_sawtooth(demo_time, NOTE_A / 4 - 20);
-        sample=LPF(sample,prev, alpha(400.0f));
+        sample = LPF(sample, prev, alpha(400.0f));
         float env3 = adsr(bar_time, ADSR(onset2, 0.4f, 0.005f, 0.004f, 0.2f,
                                          0.003f)); // Mario 8bit pitch slide
         // sample += 0.3f * env3 * osc_square(demo_time,
@@ -346,7 +341,7 @@ static void callback(void *buffer, unsigned int frames) {
         sample += 0.1f * env1 * osc_square(demo_time, NOTE_AS / 4 - 20);
       }
       /// Cental part 1 // lead + kick  // after 42 and up to 90
-    } else if (demo_time < 90.0) {
+    } else if (demo_time < 900.0) {
 
       for (int b = 0; b < 4; ++b) {
         float onset2 = b * 0.75f;
@@ -996,13 +991,10 @@ void draw_real_fft() {
 
   // Log bins with smoothening
   constexpr int log_bins = 256;
-  float logFreqs[log_bins];
   float logPowers[log_bins];
   int binCounts[log_bins] = {0};
 
   for (int i = 0; i < log_bins; ++i) {
-    float t = i / (float)(log_bins - 1);
-    logFreqs[i] = powf(10.0f, logMin + t * (logMax - logMin));
     logPowers[i] = 0;
   }
 
@@ -1079,10 +1071,9 @@ static size_t intro(Scene *sc, BumpAllocator *arena, float dur) {
     if (!msg) {
       return point_counter;
     }
-    int text_width = MeasureText(msg, FONTSIZE);
     for (size_t i = 0; i < 16 / 2; ++i) {
-      auto ps1 = Vector3Scale(p1, 24.0f);
-      auto ps2 = Vector3Scale(p2, 24.0f);
+      auto ps1 = Vector3Scale(p1, 20.0f);
+      auto ps2 = Vector3Scale(p2, 20.0f);
       Vector2 cand1 = Vector2{ps1.x + (W / 2) + (W / 8), ps1.y + (H / 2)};
       Vector2 cand2 = Vector2{ps2.x + (W / 2) + (W / 8), ps2.y + (H / 2)};
       points[point_counter] = Vector2{cand1.x / W, cand1.y / H};
@@ -1095,7 +1086,7 @@ static size_t intro(Scene *sc, BumpAllocator *arena, float dur) {
     for (size_t i = 0; i < point_counter; ++i) {
       DrawCircle(W * points[i].x, H * points[i].y, 1, i % 2 == 0 ? RED : BLUE);
     }
-    DrawText(msg, W / 4.0f - 0.5 * text_width, H / 2.0f, FONTSIZE, GOLD);
+    DrawText(msg, 32, 0.2 * H, FONTSIZE, GOLD);
     if (show_fft) {
       draw_real_fft();
     }
@@ -1128,7 +1119,7 @@ static const char *intro_post1_texts(float t) {
     return "Let's see what this \nlooks like:";
   }
   if (t >= 26.0 && t < 28) {
-    return "All that below 16 KB!\n\nLet's go!";
+    return "All that below 39 KB!\n\nLet's go!";
   }
   return nullptr;
 }
@@ -1168,11 +1159,10 @@ static void post_intro(Scene *sc, BumpAllocator *arena, float dur) {
     if (!msg) {
       return;
     }
-    int text_width = MeasureText(msg, FONTSIZE);
     if (point_counter < 10000) {
       for (size_t i = 0; i < 16 / 2; ++i) {
-        auto ps1 = Vector3Scale(p1, 20.0f);
-        auto ps2 = Vector3Scale(p2, 20.0f);
+        auto ps1 = Vector3Scale(p1, 18.0f);
+        auto ps2 = Vector3Scale(p2, 18.0f);
         Vector2 cand1 = Vector2{ps1.z + (W / 2), ps1.x + (H / 2)};
         Vector2 cand2 = Vector2{ps2.z + (W / 2), ps2.x + (H / 2)};
         points[point_counter++] = Vector2{cand1.x / W, cand1.y / H};
@@ -1323,7 +1313,7 @@ static void post_intro(Scene *sc, BumpAllocator *arena, float dur) {
       DrawLine(sinY_X, sinY_Y + 32, yX, yY - 32, LIGHTGRAY);
     }
   checkpoint:
-    DrawText(msg, W / 4.0f - 0.4 * text_width, 0.175 * H, FONTSIZE, GOLD);
+    DrawText(msg, 32, 0.2 * H, FONTSIZE, GOLD);
     actual_time += GetFrameTime();
     if (show_fft) {
       draw_real_fft();
@@ -1436,12 +1426,11 @@ static void outro(Scene *sc, BumpAllocator *arena, float dur, int n) {
       msg = "GreenHouse";
     }
 
-    int text_width = MeasureText(msg, FONTSIZE);
     for (int i = n; i > 0; --i) {
       DrawCircle(W * points[i].x, H * points[i].y, 1, i % 2 == 0 ? RED : BLUE);
     }
     n -= 16;
-    DrawText(msg, W / 4.0f - 0.5 * text_width, H / 2.0f, FONTSIZE, GOLD);
+    DrawText(msg, 32, 0.2 * H, FONTSIZE, GOLD);
     actual_time += GetFrameTime();
     if (show_fft) {
       draw_real_fft();
@@ -1453,9 +1442,14 @@ static void outro(Scene *sc, BumpAllocator *arena, float dur, int n) {
 //~Scene specific stuff and main demos
 
 static void wait() {
-  while (!IsKeyDown(KEY_SPACE)) {
+  const char* txt="Press [SPACE] To Win 42 BTC!";
+  while (!IsKeyPressed(KEY_SPACE) && !WindowShouldClose()) {
     BeginDrawing();
-    ClearBackground(BLACK);
+    const float W = GetScreenWidth();
+    const float H = GetScreenHeight();
+    auto sz = MeasureText(txt,FONTSIZE);
+    ClearBackground(ORANGE);
+    DrawText(txt, W/2-sz/2.0f, 32.0f*sinf(2*M_PI*1*GetTime())+ H/2, FONTSIZE, BLACK);
     EndDrawing();
   }
 }
@@ -1472,7 +1466,6 @@ int jump_start() {
   constexpr size_t MUSIC_MEMORY_POOL = 1024ul * 1024ul * 1024ul;
   constexpr float intro_dur = 12.0f;
   constexpr float post_intro_1_dur = 31.0f;
-  constexpr float demo_dur = 60.0f;
   constexpr float outro_dur = intro_dur;
   constexpr int FPS = 30;
   //~Settings
@@ -1499,14 +1492,12 @@ int jump_start() {
 
   // clang-format off
   SetTraceLogLevel(TraceLogLevel::LOG_NONE);
-  InitWindow(GetScreenWidth(), GetScreenHeight(), "");
-  SetWindowState(FLAG_WINDOW_RESIZABLE);
-  // ToggleFullscreen();
-  const int screenWidth  = GetScreenWidth();
-  const int screenHeight = GetScreenHeight();;
-  printf("WxH= %d %d\n",screenWidth,screenHeight);
-
-  // wait();
+  InitWindow(GetScreenWidth(), GetScreenHeight(), "A.S.T Picasso - GreenHouse");
+  SetWindowState(FLAG_WINDOW_RESIZABLE | FLAG_WINDOW_UNDECORATED);
+  ToggleFullscreen();
+  const int screenWidth  = 2*GetScreenWidth();
+  const int screenHeight = 2*GetScreenHeight();;
+  wait();
   SetExitKey(KEY_ESCAPE);
   InitAudioDevice();
   AudioStream stream = LoadAudioStream(SR, 32, 2);
