@@ -102,7 +102,7 @@ constexpr float NOTE_B = 493.88;
 constexpr float SEMITONE = 1.05946;
 constexpr float SR = 44100.0f;
 constexpr float NYQUIST = SR / 2;
-constexpr float MAX_HARMONICS = 16;
+constexpr float MAX_HARMONICS = 12;
 
 constexpr float alpha(float cutoff_freq) {
   const float rc = 1.0f / (2.0f * M_PI * cutoff_freq);
@@ -1086,7 +1086,7 @@ static size_t intro(Scene *sc, BumpAllocator *arena, float dur) {
     for (size_t i = 0; i < point_counter; ++i) {
       DrawCircle(W * points[i].x, H * points[i].y, 1, i % 2 == 0 ? RED : BLUE);
     }
-    DrawText(msg, 0.25*W, 0.5 * H +osc_sine(GetTime(), 0.2)*32*sinf(2.0*M_PI*0.5*GetTime()), FONTSIZE, GOLD);
+    DrawText(msg, 0.25*W, 0.5 * H +osc_sine(GetTime(), 0.2)*32*sinf(2.0*M_PI*0.5*GetTime()), FONTSIZE, ORANGE);
     if (show_fft) {
       draw_real_fft();
     }
@@ -1107,7 +1107,7 @@ static const char *intro_post1_texts(float t) {
     return "Today each AST node \n is an operator.";
   }
   if (t >= 12.0 && t < 15) {
-    return "Our vocabulary for today: ";
+    return "Our grammar for today: ";
   }
   if (t >= 15.0 && t < 19) {
     return "add, mut, mod, exp, sin,\n sqrt, pow";
@@ -1314,7 +1314,7 @@ static void post_intro(Scene *sc, BumpAllocator *arena, float dur) {
       DrawLine(sinY_X, sinY_Y + 32, yX, yY - 32, LIGHTGRAY);
     }
   checkpoint:
-    DrawText(msg, 32, 0.2 * H +osc_sine(GetTime(), 0.1)*16*sinf(2.0*M_PI*0.5*GetTime()), FONTSIZE, GOLD);
+    DrawText(msg, 32, 0.2 * H +osc_sine(GetTime(), 0.1)*16*sinf(2.0*M_PI*0.5*GetTime()), FONTSIZE, ORANGE);
     actual_time += GetFrameTime();
     if (show_fft) {
       draw_real_fft();
@@ -1431,7 +1431,8 @@ static void outro(Scene *sc, BumpAllocator *arena, float dur, int n) {
       DrawCircle(W * points[i].x, H * points[i].y, 1, i % 2 == 0 ? RED : BLUE);
     }
     n -= 16;
-    DrawText(msg, 32, 0.2 * H, FONTSIZE, GOLD);
+    // DrawText(msg, 32, 0.2 * H, FONTSIZE, GOLD);
+    DrawText(msg, 0.2*W, 0.5 * H +osc_sine(GetTime(), 0.2)*32*sinf(2.0*M_PI*0.5*GetTime()), FONTSIZE, ORANGE);
     actual_time += GetFrameTime();
     if (show_fft) {
       draw_real_fft();
@@ -1455,6 +1456,19 @@ static void wait() {
   }
 }
 
+static void wait_more() {
+  const char* txt="Yeeaaah...You Wish...LOL";
+  float t = GetTime();
+  while (GetTime()-t<5.0f) {
+    BeginDrawing();
+    const float W = GetScreenWidth();
+    const float H = GetScreenHeight();
+    auto sz = MeasureText(txt,FONTSIZE);
+    ClearBackground(ORANGE);
+    DrawText(txt, 32.0f*sinf(2*M_PI*1*GetTime())+W/2-sz/2.0f, 32.0f*cos(2*M_PI*1*GetTime())+ H/2, FONTSIZE, BLACK);
+    EndDrawing();
+  }
+}
 /*
 NOTES
 +Due to memory pool usage waves do not need to be unloaded
@@ -1462,13 +1476,13 @@ NOTES
 extern "C" {
 int jump_start() {
   // Setttings
-  constexpr int seed = 512; // Adam no touch! (0:142) (1:512)
+  constexpr int seed = 256; // Adam no touch! (0:142) (1:512)
   constexpr size_t SCENE_MEMORY_POOL = 1024ul * 1024ul * 1024ul;
   constexpr size_t MUSIC_MEMORY_POOL = 1024ul * 1024ul * 1024ul;
   constexpr float intro_dur = 12.0f;
   constexpr float post_intro_1_dur = 31.0f;
   constexpr float outro_dur = intro_dur;
-  constexpr int FPS = 30;
+  constexpr int FPS = 60;
   //~Settings
   srand(seed);
 
@@ -1499,6 +1513,8 @@ int jump_start() {
   const int screenWidth  = 2*GetScreenWidth();
   const int screenHeight = 2*GetScreenHeight();;
   wait();
+  wait_more();
+  DisableCursor();
   SetExitKey(KEY_ESCAPE);
   InitAudioDevice();
   AudioStream stream = LoadAudioStream(SR, 32, 2);
@@ -1544,7 +1560,7 @@ int jump_start() {
           scene_arena.release();
           demo_march(&scene, &scene_arena, &music_arena, 4,1.0,1,1,1);
           scene_arena.release();
-          for (int i=1; i< 3; ++i){
+          for (int i=1; i< 4; ++i){
             demo_ast(&scene, &scene_arena, &music_arena, 2,depth,false);
             scene.time+=GetFrameTime();
             demo_march(&scene, &scene_arena, &music_arena, 2,1.0,1,1,1);
