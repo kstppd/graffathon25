@@ -310,146 +310,10 @@ static void callback(void *buffer, unsigned int frames) {
     float sample = 0.0f;
     const float bar_time = fmodf(demo_time, 4.0f);
 
-    /// first part // lead only  // up to 8.0
     if (demo_time < 8.0) {
       for (int b = 0; b < 8; ++b) {
         float onset1 = b * 0.5f;
         float env1 = adsr(bar_time, ADSR(onset1, 0.5f, 0.5f, 0.05f, 0.2f,
-                                         0.05f)); // Lead Synth tune
-        sample += 0.1 * env1 * osc_square(demo_time, NOTE_A / 4.0f - 20.0f);
-        sample = hp_filter_lead.process(sample);
-      }
-    } else if (demo_time < 31.0) {
-      for (int b = 0; b < 8; ++b) {
-        const float onset1 = b * 0.5f;
-        const float onset2 = b * 0.25f;
-        const float env2 = adsr(bar_time, ADSR(onset2, 0.5f, 0.005f, 0.004f, 0.001f,
-                                         0.003f)); // Kick tune
-        sample += 2.0f * env2 * osc_sawtooth(demo_time, NOTE_A / 4 - 20);
-        sample = lp_filter_kick.process(sample);
-        const float env1 = adsr(bar_time, ADSR(onset1, 0.5f, 0.5f, 0.05f, 0.2f,
-                                         0.05f)); // Lead Synth tune
-        sample += 0.1f * env1 * osc_square(demo_time, NOTE_AS / 4 - 20);
-      }
-    } else if (demo_time < 42.0) {
-      for (int b = 0; b < 8; ++b) {
-        float onset1 = b * 0.5f;
-        float onset2 = b * 0.25f;
-        float env2 = adsr(bar_time, ADSR(onset2, 0.5f, 0.005f, 0.004f, 0.001f,
-                                         0.003f)); // Kick tune
-        sample += 2.0f * env2 * osc_sawtooth(demo_time, NOTE_A / 4 - 20);
-        sample = lp_filter_kick.process(sample);
-        float env3 = adsr(bar_time, ADSR(onset2, 0.4f, 0.005f, 0.004f, 0.2f,
-                                         0.003f)); // Mario 8bit pitch slide
-        // sample += 0.3f * env3 * osc_square(demo_time,
-        // NOTE_DS+0.03*onset2*NOTE_DS );
-        sample += 0.8f * env3 * osc_sawtooth(demo_time, NOTE_A + 4 * b);
-
-        float env1 = adsr(bar_time, ADSR(onset1, 0.5f, 0.5f, 0.05f, 0.2f,
-                                         0.05f)); // Lead Synth tune
-        sample += 0.1f * env1 * osc_square(demo_time, NOTE_AS / 4 - 20);
-      }
-    } else if (demo_time < 120.0) {
-
-      for (int b = 0; b < 4; ++b) {
-        float onset2 = b * 0.75f;
-        float env_fat = adsr(bar_time, ADSR(onset2, 0.4f, 0.005f, 0.05f, 0.3f,
-                                            0.2f)); // FAT synth tune
-        sample += 0.4f * env_fat * osc_square(demo_time, NOTE_B / 4 - 62);
-
-        if (demo_time > 50.0) { // if more than 36.0 !!!!!
-
-          float onset_kick = b * 0.5f;
-          float env_kick =
-              adsr(bar_time, ADSR(onset_kick, 0.75f, 0.005f, 0.005f, 0.002f,
-                                  0.005f)); // Kick tune
-          sample += 1.7f * env_kick * osc_sawtooth(demo_time, NOTE_A / 4);
-        }
-
-        if (demo_time > 58.0) { // if more than 40.0 !!!!!
-          float onset_noiz = b * 1.0f + 0.25;
-          float env_kick = adsr(bar_time, ADSR(onset_noiz, 0.75f, 0.04f, 0.005f,
-                                               0.003f, 0.005f)); // noise1
-          sample += 1.0f * env_kick * noise();
-        }
-
-        if (demo_time > 66.0) { // if more than 40.0 !!!!!
-          float onset_crush = b * 1.0f + 0.5;
-          float env_crush =
-              adsr(bar_time, ADSR(onset_crush, 0.075f, 0.04f, 0.05f, 0.03f,
-                                  0.005f)); // melodic noise
-          sample += 1.f * env_crush * noise();
-          sample += 1.f * env_crush * osc_sawtooth(demo_time, NOTE_B / 4);
-        }
-
-        if (demo_time > 74.0) { // if more than 40.0 !!!!!
-          float onset_crush1 = b * 1.0f + 0.5;
-          float onset_crush2 = b * 1.0f + 0.6;
-
-          float env_crush1 =
-              adsr(bar_time, ADSR(onset_crush1, 0.075f, 0.04f, 0.05f, 0.03f,
-                                  0.005f)); // melodic noise 2
-          sample += 1.f * env_crush1 * noise();
-          sample += 1.f * env_crush1 * osc_sawtooth(demo_time, NOTE_B / 4);
-
-          float env_crush2 =
-              adsr(bar_time, ADSR(onset_crush2, 0.075f, 0.04f, 0.05f, 0.03f,
-                                  0.005f)); // melodic noise 2
-          sample += 1.f * env_crush2 * noise();
-          sample += 1.f * env_crush2 * osc_sawtooth(demo_time, NOTE_D / 4);
-        }
-      }
-    }
-
-    sample = clamp(sample, -1.0f, 1.0f);
-    d[2 * i] = sample;
-    d[2 * i + 1] = sample;
-    fft_buffer[i].r = sample;
-    fft_buffer[i].i = 0;
-    if (sample > 0.1 && !do_fft) {
-      do_fft = true;
-      }
-      demo_time += dt;
-    }
-
-  if (do_fft) {
-    apply_hann(fft_buffer, frames);
-    tiny_fft(fft_buffer, frames);
-    for (unsigned int i = 0; i < 1 + frames / 2; ++i) {
-      fft_data[i] = fft_buffer[i].r;
-    }
-    fft_data[0] = 0.0f; // nuke dc
-    fft_size = 1 + frames / 2;
-  }
-  global_arena->release();
-  ncallbacks++;
-}
-
-
-
-static void _callback(void *buffer, unsigned int frames) {
-  static float demo_time = 0.0f;
-  static float dt = 1.0f / SR;
-  static float prev = 0;
-  float *const d = reinterpret_cast<float *>(buffer);
-  bool do_fft = false;
-  ComplexNum *fft_buffer = global_arena->allocate<ComplexNum>(frames);
-
-  for (unsigned int i = 0; i < frames; ++i) {
-    float t_in_bar = fmodf(demo_time, 2.0f);
-    float sample = 0.0f;
-
-// Check out bar
-// if (demo_time < 8.0) {
-//   }
-#if 1
-    sample = osc_sine(demo_time, 5000);
-#else
-    /// first part // lead only  // up to 8.0
-    if (demo_time < 8.0) {
-      for (int b = 0; b < 8; ++b) {
-        float onset1 = b * 0.5f;
-        float env1 = adsr(t_in_bar, ADSR(onset1, 0.5f, 0.5f, 0.05f, 0.2f,
                                          0.05f)); // Lead Synth tune
         sample += 0.1f * env1 * osc_square(demo_time, NOTE_AS / 4 - 20);
         // sample = hp_filter_lead.process(sample);
@@ -463,12 +327,12 @@ static void _callback(void *buffer, unsigned int frames) {
         float onset1 = b * 0.5f;
         float onset2 = b * 0.25f;
 
-        float env2 = adsr(t_in_bar, ADSR(onset2, 0.5f, 0.005f, 0.004f, 0.001f,
+        float env2 = adsr(bar_time, ADSR(onset2, 0.5f, 0.005f, 0.004f, 0.001f,
                                          0.003f)); // Kick tune
         sample += 2.0f * env2 * osc_sawtooth(demo_time, NOTE_A / 4 - 20);
-        // sample = lp_filter_kick.process(sample);
+        sample = lp_filter_kick.process(sample);
 
-        float env1 = adsr(t_in_bar, ADSR(onset1, 0.5f, 0.5f, 0.05f, 0.2f,
+        float env1 = adsr(bar_time, ADSR(onset1, 0.5f, 0.5f, 0.05f, 0.2f,
                                          0.05f)); // Lead Synth tune
         sample += 0.1f * env1 * osc_square(demo_time, NOTE_AS / 4 - 20);
       }
@@ -482,100 +346,165 @@ static void _callback(void *buffer, unsigned int frames) {
         float onset1 = b * 0.5f;
         float onset2 = b * 0.25f;
 
-        float env2 = adsr(t_in_bar, ADSR(onset2, 0.5f, 0.005f, 0.004f, 0.001f,
+        float env2 = adsr(bar_time, ADSR(onset2, 0.5f, 0.005f, 0.004f, 0.001f,
                                          0.003f)); // Kick tune
         sample += 2.0f * env2 * osc_sawtooth(demo_time, NOTE_A / 4 - 20);
-        // sample = lp_filter_kick.process(sample);
+        sample = lp_filter_kick.process(sample);
 
-        float env3 = adsr(t_in_bar, ADSR(onset2, 0.4f, 0.005f, 0.004f, 0.2f,
+        float env3 = adsr(bar_time, ADSR(onset2, 0.4f, 0.005f, 0.004f, 0.2f,
                                          0.003f)); // Mario 8bit pitch slide
         // sample += 0.3f * env3 * osc_square(demo_time,
         // NOTE_DS+0.03*onset2*NOTE_DS );
         sample += 0.8f * env3 * osc_sawtooth(demo_time, NOTE_A + 4 * b);
 
-        float env1 = adsr(t_in_bar, ADSR(onset1, 0.5f, 0.5f, 0.05f, 0.2f,
+        float env1 = adsr(bar_time, ADSR(onset1, 0.5f, 0.5f, 0.05f, 0.2f,
                                          0.05f)); // Lead Synth tune
         sample += 0.1f * env1 * osc_square(demo_time, NOTE_AS / 4 - 20);
       }
 
-      /// Cental part 1 // lead + kick  // up to 56.0
-    } else if (demo_time < 120.0) {
+      /// Cental part 1 // lead + kick  // after 42 and up to 90
+    } else if (demo_time < 90.0) {
 
       for (int b = 0; b < 4; ++b) {
         float onset2 = b * 0.75f;
-        float env_fat = adsr(t_in_bar, ADSR(onset2, 0.4f, 0.005f, 0.05f, 0.3f,
+        float env_fat = adsr(bar_time, ADSR(onset2, 0.4f, 0.005f, 0.05f, 0.3f,
                                             0.2f)); // FAT synth tune
         sample += 0.4f * env_fat * osc_square(demo_time, NOTE_B / 4 - 62);
 
-        if (demo_time > 50.0) { // if more than 36.0 !!!!!
+        if (demo_time > 50.0) { // if more than 50.0 !!!!!
 
           float onset_kick = b * 0.5f;
           float env_kick =
-              adsr(t_in_bar, ADSR(onset_kick, 0.75f, 0.005f, 0.005f, 0.002f,
+              adsr(bar_time, ADSR(onset_kick, 0.75f, 0.005f, 0.005f, 0.002f,
                                   0.005f)); // Kick tune
           sample += 1.7f * env_kick * osc_sawtooth(demo_time, NOTE_A / 4);
         }
 
-        if (demo_time > 58.0) { // if more than 40.0 !!!!!
+        if (demo_time > 58.0) { // if more than 58.0 !!!!!
           float onset_noiz = b * 1.0f + 0.25;
-          float env_kick = adsr(t_in_bar, ADSR(onset_noiz, 0.75f, 0.04f, 0.005f,
+          float env_kick = adsr(bar_time, ADSR(onset_noiz, 0.75f, 0.04f, 0.005f,
                                                0.003f, 0.005f)); // noise1
           sample += 1.0f * env_kick * noise();
         }
 
-        if (demo_time > 66.0) { // if more than 40.0 !!!!!
+        if (demo_time > 66.0) { // if more than 66.0 !!!!!
           float onset_crush = b * 1.0f + 0.5;
           float env_crush =
-              adsr(t_in_bar, ADSR(onset_crush, 0.075f, 0.04f, 0.05f, 0.03f,
+              adsr(bar_time, ADSR(onset_crush, 0.075f, 0.04f, 0.05f, 0.03f,
                                   0.005f)); // melodic noise
           sample += 1.f * env_crush * noise();
           sample += 1.f * env_crush * osc_sawtooth(demo_time, NOTE_B / 4);
         }
 
-        if (demo_time > 74.0) { // if more than 40.0 !!!!!
-          float onset_crush1 = b * 1.0f + 0.5;
+        if (demo_time > 74.0) { // if more than 74.0 !!!!!
+          // float onset_crush1 = b * 1.0f + 0.5;
           float onset_crush2 = b * 1.0f + 0.6;
 
-          float env_crush1 =
-              adsr(t_in_bar, ADSR(onset_crush1, 0.075f, 0.04f, 0.05f, 0.03f,
-                                  0.005f)); // melodic noise 2
-          sample += 1.f * env_crush1 * noise();
-          sample += 1.f * env_crush1 * osc_sawtooth(demo_time, NOTE_B / 4);
-
           float env_crush2 =
-              adsr(t_in_bar, ADSR(onset_crush2, 0.075f, 0.04f, 0.05f, 0.03f,
+              adsr(bar_time, ADSR(onset_crush2, 0.075f, 0.04f, 0.05f, 0.03f,
                                   0.005f)); // melodic noise 2
           sample += 1.f * env_crush2 * noise();
           sample += 1.f * env_crush2 * osc_sawtooth(demo_time, NOTE_D / 4);
         }
 
-      } // end of central part 1
+      } // end of b loop
 
-    } // end of callback
+    } // end of central part 1
 
-// else if (demo_time < 32.0) {
+    else if (demo_time < 98.0) { // FINAL PART 1
 
-// // Noise
-// {
-//   for (int b = 0; b < 8; ++b) {
-//     float onset = b * 0.25f;
-//     float rel_time = t_in_bar - onset;
-//     if (rel_time >= 0.0f && rel_time < 0.08f) {
-//       float env =
-//           adsr(t_in_bar, onset, 0.001f, 0.005f, 0.05f, 0.05f, 0.02f);
-//       float n = noise(); // Random sample
-//       sample += 0.05f * env * n;
-//     }
-//   }
-// }
+      for (int b = 0; b < 4; ++b) {
+        float onset_crush1 = b * 1.0f + 0.5;
+        float onset_crush2 = b * 1.0f + 0.6;
+        // float onset_lead_central = b * 1.0f + 0.75;
+        float onset_kick = b * 0.5f;
 
-// // Bassline
-// int bass_index = (int)(t_in_bar / 0.5f) % NUM_BASS_NOTES;
-// float bass_freq = bassline_freqs[bass_index];
-// float bass_env =
-//     adsr(fmodf(t_in_bar, 0.5f), 0.0f, 0.2f, 0.01f, 0.05f, 0.3f, 0.1f);
-// sample += 0.6f * bass_env * osc_sine(demo_time, bass_freq);
-#endif // 0
+        float env_kick = adsr(bar_time, ADSR(onset_kick, 0.75f, 0.005f, 0.005f,
+                                             0.002f, 0.005f)); // Kick tune
+        sample += 1.7f * env_kick * osc_sawtooth(demo_time, NOTE_A / 4);
+
+        float env_crush1 =
+            adsr(bar_time, ADSR(onset_crush1, 0.075f, 0.04f, 0.05f, 0.03f,
+                                0.005f)); // melodic noise 2
+        sample += 1.f * env_crush1 * noise();
+        sample += 1.f * env_crush1 * osc_sawtooth(demo_time, NOTE_B / 4);
+
+        float env_crush2 =
+            adsr(bar_time, ADSR(onset_crush2, 0.075f, 0.04f, 0.05f, 0.03f,
+                                0.005f)); // melodic noise 2
+        sample += 1.f * env_crush2 * noise();
+        sample += 1.f * env_crush2 * osc_sawtooth(demo_time, NOTE_D / 4);
+      }
+
+    }
+
+    else if (demo_time < 98.0) { // FINAL PART 2
+
+      for (int b = 0; b < 4; ++b) {
+        float onset_crush1 = b * 1.0f + 0.5;
+        // float onset_crush2 = b * 1.0f + 0.6;
+        // float onset_lead_central = b * 1.0f + 0.75;
+        float onset_kick = b * 0.5f;
+
+        float env_kick = adsr(bar_time, ADSR(onset_kick, 0.75f, 0.005f, 0.005f,
+                                             0.002f, 0.005f)); // Kick tune
+        sample += 1.7f * env_kick * osc_sawtooth(demo_time, NOTE_A / 4);
+
+        float env_crush1 =
+            adsr(bar_time, ADSR(onset_crush1, 0.075f, 0.04f, 0.05f, 0.03f,
+                                0.005f)); // melodic noise 2
+        sample += 1.f * env_crush1 * noise();
+        sample += 1.f * env_crush1 * osc_sawtooth(demo_time, NOTE_B / 4);
+      }
+
+    }
+
+    else if (demo_time < 106.0) { // FINAL PART 3
+
+      for (int b = 0; b < 4; ++b) {
+        // float onset_crush1 = b * 1.0f + 0.5;
+        // float onset_crush2 = b * 1.0f + 0.6;
+        // float onset_lead_central = b * 1.0f + 0.75;
+        float onset_kick = b * 0.5f;
+
+        float env_kick = adsr(bar_time, ADSR(onset_kick, 0.75f, 0.005f, 0.005f,
+                                             0.002f, 0.005f)); // Kick tune
+        sample += 1.7f * env_kick * osc_sawtooth(demo_time, NOTE_A / 4);
+      }
+
+    }
+
+    else if (demo_time < 112.0) { // FINAL PART 4
+
+      for (int b = 0; b < 4; ++b) {
+        // float onset_crush1 = b * 1.0f + 0.5;
+        // float onset_crush2 = b * 1.0f + 0.6;
+        // float onset_lead_central = b * 1.0f + 0.75;
+        float onset_kick = b * 0.5f;
+
+        float env_kick = adsr(bar_time, ADSR(onset_kick, 0.75f, 0.005f, 0.005f,
+                                             0.002f, 0.005f)); // Kick tune
+        sample += 1.7f * env_kick * osc_sawtooth(demo_time, NOTE_A / 4);
+      }
+
+    }
+
+    else if (demo_time < 120.0) { // FINAL PART 5
+
+      for (int b = 0; b < 4; ++b) {
+        float onset_kick = b * 0.5f;
+        float onset_synth = 0.001f;
+
+        float env_kick = adsr(bar_time, ADSR(onset_kick, 0.75f, 0.005f, 0.005f,
+                                             0.002f, 0.005f)); // Kick tune
+        sample += 1.7f * env_kick * osc_sawtooth(demo_time, NOTE_A / 4);
+
+        float env1 = adsr(bar_time, ADSR(onset_synth, 0.01f, 0.01f, 0.05f, 0.2f,
+                                         0.5f)); // Lead Synth tune
+        sample += 0.1f * env1 * osc_square(demo_time, NOTE_AS / 4 - 20);
+      }
+    }
+
     sample = clamp(sample, -1.0f, 1.0f);
     d[2 * i] = sample;
     d[2 * i + 1] = sample;
@@ -599,6 +528,7 @@ static void _callback(void *buffer, unsigned int frames) {
   global_arena->release();
   ncallbacks++;
 }
+
 //~Music stuff
 
 // AST Stuff
