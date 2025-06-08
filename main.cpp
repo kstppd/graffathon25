@@ -940,10 +940,10 @@ static const char *intro_texts(float t) {
     return "By GreenHouse!";
   }
   if (t >= 8.0 && t < 10) {
-    return "..in under 16 KB!";
+    return "..in under 39 KB!";
   }
   if (t >= 10.0 && t < 12) {
-    return " 16 KB? LMFAO! <3";
+    return " 39 KB? LMFAO! <3";
   }
   return nullptr;
 }
