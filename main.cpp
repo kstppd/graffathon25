@@ -104,6 +104,7 @@ constexpr float NOTE_B = 493.88;
 constexpr float SEMITONE = 1.05946;
 constexpr float SR = 44100.0f;
 constexpr float NYQUIST = SR / 2;
+constexpr float MAX_HARMONICS = 16;
 
 constexpr float alpha(float cutoff_freq) {
   const float rc = 1.0f / (2.0f * M_PI * cutoff_freq);
@@ -118,7 +119,7 @@ static constexpr float osc_sine(float t, float fundamental) {
 
 // https://en.wikipedia.org/wiki/Square_wave_(waveform)
 static constexpr float osc_square(float t, float fundamental) {
-  const int max_harmonic = (int)(NYQUIST / fundamental);
+  const int max_harmonic = fmin(NYQUIST / fundamental,MAX_HARMONICS);
   float value = 0.0f;
   for (int k = 1; k <= max_harmonic; ++k) {
     value += sinf(2.0f * M_PI * (2.0f * k - 1.0f) * fundamental * t) /
@@ -130,8 +131,7 @@ static constexpr float osc_square(float t, float fundamental) {
 
 // https://en.wikipedia.org/wiki/Sawtooth_wave
 static constexpr float osc_sawtooth(float t, float fundamental) {
-  const float nyquist = SR * 0.5f;
-  const int max_harmonic = (int)(nyquist / fundamental);
+  const int max_harmonic = fmin(NYQUIST / fundamental,MAX_HARMONICS);
   float value = 0.0f;
   for (int k = 1; k <= max_harmonic; ++k) {
     value += sinf(2.0f * M_PI * fundamental * k * t) / k;
@@ -296,7 +296,138 @@ static HighPassFilter hp_filter_lead(100.0f); // Set your cutoff in Hz
 static LowPassFilter lp_filter_kick(400.0f);  // Set your cutoff in Hz
 
 // IVAN
+//
+//
 static void callback(void *buffer, unsigned int frames) {
+  static float demo_time = 0.0f;
+  static float dt = 1.0f / SR;
+  static float prev = 0;
+  float *const d = reinterpret_cast<float *>(buffer);
+  bool do_fft = false;
+  ComplexNum *fft_buffer = global_arena->allocate<ComplexNum>(frames);
+
+  for (unsigned int i = 0; i < frames; ++i) {
+    float sample = 0.0f;
+    const float bar_time = fmodf(demo_time, 4.0f);
+
+    /// first part // lead only  // up to 8.0
+    if (demo_time < 8.0) {
+      for (int b = 0; b < 8; ++b) {
+        float onset1 = b * 0.5f;
+        float env1 = adsr(bar_time, ADSR(onset1, 0.5f, 0.5f, 0.05f, 0.2f,
+                                         0.05f)); // Lead Synth tune
+        sample += 0.1 * env1 * osc_square(demo_time, NOTE_A / 4.0f - 20.0f);
+        sample = hp_filter_lead.process(sample);
+      }
+    } else if (demo_time < 31.0) {
+      for (int b = 0; b < 8; ++b) {
+        const float onset1 = b * 0.5f;
+        const float onset2 = b * 0.25f;
+        const float env2 = adsr(bar_time, ADSR(onset2, 0.5f, 0.005f, 0.004f, 0.001f,
+                                         0.003f)); // Kick tune
+        sample += 2.0f * env2 * osc_sawtooth(demo_time, NOTE_A / 4 - 20);
+        sample = lp_filter_kick.process(sample);
+        const float env1 = adsr(bar_time, ADSR(onset1, 0.5f, 0.5f, 0.05f, 0.2f,
+                                         0.05f)); // Lead Synth tune
+        sample += 0.1f * env1 * osc_square(demo_time, NOTE_AS / 4 - 20);
+      }
+    } else if (demo_time < 42.0) {
+      for (int b = 0; b < 8; ++b) {
+        float onset1 = b * 0.5f;
+        float onset2 = b * 0.25f;
+        float env2 = adsr(bar_time, ADSR(onset2, 0.5f, 0.005f, 0.004f, 0.001f,
+                                         0.003f)); // Kick tune
+        sample += 2.0f * env2 * osc_sawtooth(demo_time, NOTE_A / 4 - 20);
+        sample = lp_filter_kick.process(sample);
+        float env3 = adsr(bar_time, ADSR(onset2, 0.4f, 0.005f, 0.004f, 0.2f,
+                                         0.003f)); // Mario 8bit pitch slide
+        // sample += 0.3f * env3 * osc_square(demo_time,
+        // NOTE_DS+0.03*onset2*NOTE_DS );
+        sample += 0.8f * env3 * osc_sawtooth(demo_time, NOTE_A + 4 * b);
+
+        float env1 = adsr(bar_time, ADSR(onset1, 0.5f, 0.5f, 0.05f, 0.2f,
+                                         0.05f)); // Lead Synth tune
+        sample += 0.1f * env1 * osc_square(demo_time, NOTE_AS / 4 - 20);
+      }
+    } else if (demo_time < 120.0) {
+
+      for (int b = 0; b < 4; ++b) {
+        float onset2 = b * 0.75f;
+        float env_fat = adsr(bar_time, ADSR(onset2, 0.4f, 0.005f, 0.05f, 0.3f,
+                                            0.2f)); // FAT synth tune
+        sample += 0.4f * env_fat * osc_square(demo_time, NOTE_B / 4 - 62);
+
+        if (demo_time > 50.0) { // if more than 36.0 !!!!!
+
+          float onset_kick = b * 0.5f;
+          float env_kick =
+              adsr(bar_time, ADSR(onset_kick, 0.75f, 0.005f, 0.005f, 0.002f,
+                                  0.005f)); // Kick tune
+          sample += 1.7f * env_kick * osc_sawtooth(demo_time, NOTE_A / 4);
+        }
+
+        if (demo_time > 58.0) { // if more than 40.0 !!!!!
+          float onset_noiz = b * 1.0f + 0.25;
+          float env_kick = adsr(bar_time, ADSR(onset_noiz, 0.75f, 0.04f, 0.005f,
+                                               0.003f, 0.005f)); // noise1
+          sample += 1.0f * env_kick * noise();
+        }
+
+        if (demo_time > 66.0) { // if more than 40.0 !!!!!
+          float onset_crush = b * 1.0f + 0.5;
+          float env_crush =
+              adsr(bar_time, ADSR(onset_crush, 0.075f, 0.04f, 0.05f, 0.03f,
+                                  0.005f)); // melodic noise
+          sample += 1.f * env_crush * noise();
+          sample += 1.f * env_crush * osc_sawtooth(demo_time, NOTE_B / 4);
+        }
+
+        if (demo_time > 74.0) { // if more than 40.0 !!!!!
+          float onset_crush1 = b * 1.0f + 0.5;
+          float onset_crush2 = b * 1.0f + 0.6;
+
+          float env_crush1 =
+              adsr(bar_time, ADSR(onset_crush1, 0.075f, 0.04f, 0.05f, 0.03f,
+                                  0.005f)); // melodic noise 2
+          sample += 1.f * env_crush1 * noise();
+          sample += 1.f * env_crush1 * osc_sawtooth(demo_time, NOTE_B / 4);
+
+          float env_crush2 =
+              adsr(bar_time, ADSR(onset_crush2, 0.075f, 0.04f, 0.05f, 0.03f,
+                                  0.005f)); // melodic noise 2
+          sample += 1.f * env_crush2 * noise();
+          sample += 1.f * env_crush2 * osc_sawtooth(demo_time, NOTE_D / 4);
+        }
+      }
+    }
+
+    sample = clamp(sample, -1.0f, 1.0f);
+    d[2 * i] = sample;
+    d[2 * i + 1] = sample;
+    fft_buffer[i].r = sample;
+    fft_buffer[i].i = 0;
+    if (sample > 0.1 && !do_fft) {
+      do_fft = true;
+      }
+      demo_time += dt;
+    }
+
+  if (do_fft) {
+    apply_hann(fft_buffer, frames);
+    tiny_fft(fft_buffer, frames);
+    for (unsigned int i = 0; i < 1 + frames / 2; ++i) {
+      fft_data[i] = fft_buffer[i].r;
+    }
+    fft_data[0] = 0.0f; // nuke dc
+    fft_size = 1 + frames / 2;
+  }
+  global_arena->release();
+  ncallbacks++;
+}
+
+
+
+static void _callback(void *buffer, unsigned int frames) {
   static float demo_time = 0.0f;
   static float dt = 1.0f / SR;
   static float prev = 0;
@@ -1028,25 +1159,25 @@ static size_t intro(Scene *sc, BumpAllocator *arena, float dur) {
     const float W = GetScreenWidth();
     const float H = GetScreenHeight();
     BeginDrawing();
-    ClearBackground(BLACK);
     auto msg = intro_texts(actual_time);
     if (!msg) {
       return point_counter;
     }
-    int text_width = MeasureText(msg, 100);
+    int text_width = MeasureText(msg, FONTSIZE);
     for (size_t i = 0; i < 16 / 2; ++i) {
       auto ps1 = Vector3Scale(p1, 24.0f);
       auto ps2 = Vector3Scale(p2, 24.0f);
       Vector2 cand1 = Vector2{ps1.x + (W / 2) + (W / 8), ps1.y + (H / 2)};
       Vector2 cand2 = Vector2{ps2.x + (W / 2) + (W / 8), ps2.y + (H / 2)};
-      points[point_counter] = cand1;
-      points[point_counter + 1] = cand2;
+      points[point_counter] = Vector2{cand1.x/W,cand1.y/H};
+      points[point_counter + 1] = Vector2{cand2.x/W,cand2.y/H};
       point_counter += 2;
       p1 = getAttractor(p1, dt / 2);
       p2 = getAttractor(p2, dt / 2);
     }
+    ClearBackground(BLACK);
     for (size_t i = 0; i < point_counter; ++i) {
-      DrawCircleV(points[i], 1, i % 2 == 0 ? RED : BLUE);
+      DrawCircle(W*points[i].x,H*points[i].y, 1, i % 2 == 0 ? RED : BLUE);
     }
     DrawText(msg, W / 4.0f - 0.5 * text_width, H / 2.0f, FONTSIZE, GOLD);
     if (show_fft) {
@@ -1105,7 +1236,6 @@ static void post_intro(Scene *sc, BumpAllocator *arena, float dur) {
     const float W = GetScreenWidth();
     const float H = GetScreenHeight();
     BeginDrawing();
-    ClearBackground(BLACK);
     // Spawn an AST and then revert actual time back
     if (actual_time > 26 && flag) {
       float store = actual_time;
@@ -1121,19 +1251,20 @@ static void post_intro(Scene *sc, BumpAllocator *arena, float dur) {
     if (!msg) {
       return;
     }
-    int text_width = MeasureText(msg, 100);
+    int text_width = MeasureText(msg, FONTSIZE);
     for (size_t i = 0; i < 16 / 2; ++i) {
       auto ps1 = Vector3Scale(p1, 20.0f);
       auto ps2 = Vector3Scale(p2, 20.0f);
       Vector2 cand1 = Vector2{ps1.z + (W / 2), ps1.x + (H / 2)};
       Vector2 cand2 = Vector2{ps2.z + (W / 2), ps2.x + (H / 2)};
-      points[point_counter++] = cand1;
-      points[point_counter++] = cand2;
+      points[point_counter++] = Vector2{cand1.x/W,cand1.y/H};
+      points[point_counter++] = Vector2{cand2.x/W,cand2.y/H};
       p1 = getAttractor(p1, dt / 2);
       p2 = getAttractor(p2, dt / 2);
     }
+    ClearBackground(BLACK);
     for (size_t i = 0; i < point_counter; ++i) {
-      DrawCircleV(points[i], 1, i % 2 == 0 ? GOLD : PINK);
+      DrawCircle(W * points[i].x, H * points[i].y, 1, i % 2 == 0 ? GOLD : PINK);
     }
 
     if (actual_time > 20.0 && actual_time <= 26) {
@@ -1179,9 +1310,9 @@ static void post_intro(Scene *sc, BumpAllocator *arena, float dur) {
       DrawText(text, x1X - textWidth / 2.0f, x1Y - fontSize / 2.0f, fontSize,
                RAYWHITE);
       DrawLine(cosX, cosY + 32, x1X, x1Y - 32, LIGHTGRAY);
-      if (actual_time < 19.5 + 3 * anim_dt)
+      if (actual_time < 19.5 + 3 * anim_dt) {
         goto checkpoint;
-
+      }
       float powX = plusX + 160;
       float powY = plusY + 96;
       DrawEllipse(powX, powY, 64, 32, BLUE);
@@ -1382,7 +1513,7 @@ static void outro(Scene *sc, BumpAllocator *arena, float dur, int n) {
       msg = "GreenHouse";
     }
 
-    int text_width = MeasureText(msg, 100);
+    int text_width = MeasureText(msg, FONTSIZE);
     for (int i = n; i > 0; --i) {
       DrawCircleV(points[i], 1, i % 2 == 0 ? RED : BLUE);
     }
