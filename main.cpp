@@ -32,7 +32,7 @@ struct BumpAllocator {
     if (count == 0) {
       return nullptr;
     }
-    return (T *)malloc(count * sizeof(T));
+    // return (T *)malloc(count * sizeof(T));
     const size_t bytesToAllocate = count * sizeof(T);
     const size_t alignment = fmax(alignof(T), size_t(8));
 
@@ -86,7 +86,7 @@ static constexpr inline uint32_t nextPow2(uint32_t v) noexcept {
   return v;
 }
 
-constexpr int FONTSIZE = 75;
+constexpr int FONTSIZE = 50;
 constexpr float AST_INTERVAL = 8.0f;
 constexpr float NOTE_C = 261.63;
 constexpr float NOTE_CS = 277.18;
@@ -1074,20 +1074,28 @@ static const char *intro_texts(float t) {
 }
 
 void draw_real_fft() {
-  if (!fft_data || fft_size == 0)
+  if (!fft_data || fft_size == 0) {
     return;
-  const float screenW = (float)GetScreenWidth();
-  const float screenH = (float)GetScreenHeight();
+  }
+  const float W = GetScreenWidth();
+  const float H = GetScreenHeight();
+  const char* msg  ="Fastest Fourier Transform in the North";
+  const int sz = MeasureText(msg, 20);
   const float pad = 20;
-  const float plotW = screenW * 0.2f;
-  const float plotH = screenH * 0.1f;
+  const float plotW = fmax(1.2*sz,W * 0.2f);
+  const float plotH = plotW/4.5;
   const float plotX = 2 * pad;
-  const float plotY = screenH - plotH - 2 * pad;
+  const float plotY = H - plotH - 2 * pad;
   const int ticksX = 5;
   const int ticksY = 4;
 
-  // Normalize
-  float maxPower = -100000.0;
+  const float minFreq = 20.0f; 
+  const float maxFreq = NYQUIST;
+  const float logMin = log10f(minFreq);
+  const float logMax = log10f(maxFreq);
+
+  //Normalization By max 
+  float maxPower = -100000.0f;
   for (size_t i = 0; i < fft_size; ++i) {
     float mag = fft_data[i] * fft_data[i];
     if (mag > maxPower)
@@ -1095,45 +1103,77 @@ void draw_real_fft() {
   }
 
   DrawRectangleRounded(
-      Rectangle{0, plotY - pad, plotW + 4 * pad, plotH + 2 * pad}, 0.4, 1000,
+      (Rectangle){0, plotY - pad, plotW + 4 * pad, plotH + 2 * pad}, 0.4f, 1000,
       BLACK);
   DrawRectangleLinesEx((Rectangle){plotX, plotY, plotW, plotH}, 2, RAYWHITE);
+
   for (int i = 1; i < ticksX - 1; ++i) {
-    float x = plotX + (i / (float)ticksX) * plotW;
+    const float t = i / (float)(ticksX - 1);
+    const float f = powf(10.0f, logMin + t * (logMax - logMin));
+    const float x = plotX + ((log10f(f) - logMin) / (logMax - logMin)) * plotW;
     DrawLine((int)x, (int)plotY, (int)x, (int)(plotY + plotH), DARKGRAY);
   }
 
   for (int i = 1; i < ticksY; ++i) {
-    float y = plotY + (i / (float)ticksY) * plotH;
+    const float y = plotY + (i / (float)ticksY) * plotH;
     DrawLine((int)plotX, (int)y, (int)(plotX + plotW), (int)y, DARKGRAY);
   }
 
-  // Plot
-  for (size_t i = 0; i < fft_size - 1; i++) {
-    float f0 = (i / (float)(fft_size - 1)) * NYQUIST;
-    float f1 = ((i + 1) / (float)(fft_size - 1)) * NYQUIST;
+  // Log bins with smoothening
+  constexpr int log_bins = 256;
+  float logFreqs[log_bins];
+  float logPowers[log_bins];
+  int binCounts[log_bins] = {0};
 
-    float p0 = fft_data[i] * fft_data[i];
-    float p1 = fft_data[i + 1] * fft_data[i + 1];
-    p0 = clamp(p0 / maxPower, 0.0f, .9f);
-    p1 = clamp(p1 / maxPower, 0.0f, .9f);
-    float x0 = plotX + (f0 / NYQUIST) * plotW;
-    float x1 = plotX + (f1 / NYQUIST) * plotW;
-    float y0 = plotY + plotH * (1.0f - p0);
-    float y1 = plotY + plotH * (1.0f - p1);
-    // DrawCircle(x0,y0,1,GREEN);
-    DrawLineEx(Vector2{x0, y0}, Vector2{x1, y1}, 2.0f, GREEN);
+  for (int i = 0; i < log_bins; ++i) {
+    float t = i / (float)(log_bins - 1);
+    logFreqs[i] = powf(10.0f, logMin + t * (logMax - logMin));
+    logPowers[i] = 0;
   }
 
-  // Labels
-  DrawText("Fastest Fourier Transform in the North", plotX + 20, plotY - 20, 20,
-           RED);
+  for (size_t i = 0; i < fft_size; ++i) {
+    const float freq = (i / (float)(fft_size - 1)) * NYQUIST;
+    if (freq < minFreq) continue;
+    const float power = fft_data[i] * fft_data[i];
+    const float logf = log10f(freq);
+    const int bin = (int)((logf - logMin) / (logMax - logMin) * (log_bins - 1));
+    if (bin >= 0 && bin < log_bins) {
+      logPowers[bin] += power;
+      binCounts[bin]++;
+    }
+  }
 
-  for (int i = 0; i <= ticksX - 1; ++i) {
-    float freq = (i == 0) ? 0.0 : log10f((i * NYQUIST / ticksX));
+  for (int i = 0; i < log_bins; ++i) {
+    if (binCounts[i] > 0)
+      logPowers[i] /= binCounts[i];
+    //clamp to 0.9 otherwise it looks like shit
+    logPowers[i] = clamp(logPowers[i] / maxPower, 0.0f, 0.9f);
+  }
+
+  for (int i = 0; i < log_bins - 1; ++i) {
+    const float x0 = plotX + i / (float)(log_bins - 1) * plotW;
+    const float x1 = plotX + (i + 1) / (float)(log_bins - 1) * plotW;
+    const float y0 = plotY + plotH * (1.0f - logPowers[i]);
+    const float y1 = plotY + plotH * (1.0f - logPowers[i + 1]);
+    // DrawLineEx((Vector2){x0, y0}, (Vector2){x1, y1}, 2.0f, GREEN);
+    if (logPowers[i]>0.2){
+      DrawLineEx((Vector2){x0, (plotY + plotH)},(Vector2){x0, y0}, 1.0f, LIME);
+      DrawLineEx((Vector2){x1, (plotY + plotH)},(Vector2){x0, y0}, 1.0f, LIME);
+      DrawCircleV(Vector2{x0, y0}, 3 ,GOLD);
+      DrawCircleV(Vector2{x1, y1}, 3 ,GOLD);
+    }
+    // DrawPixel(x0, y0, RED);
+  }
+
+  // Title
+  DrawText(msg, plotX + plotW / 2.0 - sz / 2.0f, plotY - 20, 20, RED);
+
+  for (int i = 0; i < ticksX; ++i) {
+    float t = i / (float)(ticksX - 1);
+    float f = powf(10.0f, logMin + t * (logMax - logMin));
     char label[16];
-    snprintf(label, sizeof(label), "%.3fHz", freq);
-    float x = plotX + (i / (float)ticksX) * plotW - 10;
+    snprintf(label, sizeof(label), "%.0fHz", f);
+    float x = plotX + ((log10f(f) - logMin) / (logMax - logMin)) * plotW - 10;
     DrawText(label, (int)x, (int)(plotY + plotH + 4), 20, LIGHTGRAY);
   }
 
@@ -1241,9 +1281,10 @@ static void post_intro(Scene *sc, BumpAllocator *arena, float dur) {
       float store = actual_time;
       // Create a Pool from my Pool -> Insane!
       BumpAllocator tmp1(arena->allocate<float>(1024 * 1024),
-                         1024 * sizeof(float));
+                         1024 * 1024 * sizeof(float));
       flag = false;
       demo_ast(sc, arena, &tmp1, 2, 8);
+      point_counter=0;
       actual_time = store + GetFrameTime();
       continue;
     }
@@ -1252,26 +1293,32 @@ static void post_intro(Scene *sc, BumpAllocator *arena, float dur) {
       return;
     }
     int text_width = MeasureText(msg, FONTSIZE);
-    for (size_t i = 0; i < 16 / 2; ++i) {
-      auto ps1 = Vector3Scale(p1, 20.0f);
-      auto ps2 = Vector3Scale(p2, 20.0f);
-      Vector2 cand1 = Vector2{ps1.z + (W / 2), ps1.x + (H / 2)};
-      Vector2 cand2 = Vector2{ps2.z + (W / 2), ps2.x + (H / 2)};
-      points[point_counter++] = Vector2{cand1.x/W,cand1.y/H};
-      points[point_counter++] = Vector2{cand2.x/W,cand2.y/H};
-      p1 = getAttractor(p1, dt / 2);
-      p2 = getAttractor(p2, dt / 2);
+    if (point_counter < 10000) {
+      for (size_t i = 0; i < 16 / 2; ++i) {
+        auto ps1 = Vector3Scale(p1, 20.0f);
+        auto ps2 = Vector3Scale(p2, 20.0f);
+        Vector2 cand1 = Vector2{ps1.z + (W / 2), ps1.x + (H / 2)};
+        Vector2 cand2 = Vector2{ps2.z + (W / 2), ps2.x + (H / 2)};
+        points[point_counter++] = Vector2{cand1.x / W, cand1.y / H};
+        points[point_counter++] = Vector2{cand2.x / W, cand2.y / H};
+        p1 = getAttractor(p1, dt / 2);
+        p2 = getAttractor(p2, dt / 2);
+      }
     }
     ClearBackground(BLACK);
-    for (size_t i = 0; i < point_counter; ++i) {
-      DrawCircle(W * points[i].x, H * points[i].y, 1, i % 2 == 0 ? GOLD : PINK);
+    //Skip this for upcoming AST graphic
+    if (!(actual_time > 20.0 && actual_time <= 26)) {
+      for (size_t i = 0; i < point_counter; ++i) {
+        DrawCircle(W * points[i].x, H * points[i].y, 1,
+                   i % 2 == 0 ? GOLD : PINK);
+      }
     }
-
+   
     if (actual_time > 20.0 && actual_time <= 26) {
       const float anim_dt = 0.25f;
       float fontSize = 32;
-      float rootX = 0.25f * W;
-      float rootY = 0.45f * H;
+      float rootX = 0.75f * W;
+      float rootY = 0.25f * H;
       DrawEllipse(rootX, rootY, 64, 32, RED);
       const char *text = "sin";
       int textWidth = MeasureText(text, fontSize);
@@ -1515,7 +1562,7 @@ static void outro(Scene *sc, BumpAllocator *arena, float dur, int n) {
 
     int text_width = MeasureText(msg, FONTSIZE);
     for (int i = n; i > 0; --i) {
-      DrawCircleV(points[i], 1, i % 2 == 0 ? RED : BLUE);
+      DrawCircle(W * points[i].x, H * points[i].y, 1, i % 2 == 0 ? RED : BLUE);
     }
     n -= 16;
     DrawText(msg, W / 4.0f - 0.5 * text_width, H / 2.0f, FONTSIZE, GOLD);
