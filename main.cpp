@@ -1,4 +1,3 @@
-#include "raylib/src/raylib.h"
 #include <cmath>
 #include <cstdint>
 #include <cstdio>
@@ -32,7 +31,7 @@ struct BumpAllocator {
     if (count == 0) {
       return nullptr;
     }
-    // return (T *)malloc(count * sizeof(T));
+    return (T*)malloc(count*sizeof(T));
     const size_t bytesToAllocate = count * sizeof(T);
     const size_t alignment = fmax(alignof(T), size_t(8));
 
@@ -119,7 +118,7 @@ static constexpr float osc_sine(float t, float fundamental) {
 
 // https://en.wikipedia.org/wiki/Square_wave_(waveform)
 static constexpr float osc_square(float t, float fundamental) {
-  const int max_harmonic = fmin(NYQUIST / fundamental,MAX_HARMONICS);
+  const int max_harmonic = fmin(NYQUIST / fundamental, MAX_HARMONICS);
   float value = 0.0f;
   for (int k = 1; k <= max_harmonic; ++k) {
     value += sinf(2.0f * M_PI * (2.0f * k - 1.0f) * fundamental * t) /
@@ -131,7 +130,7 @@ static constexpr float osc_square(float t, float fundamental) {
 
 // https://en.wikipedia.org/wiki/Sawtooth_wave
 static constexpr float osc_sawtooth(float t, float fundamental) {
-  const int max_harmonic = fmin(NYQUIST / fundamental,MAX_HARMONICS);
+  const int max_harmonic = fmin(NYQUIST / fundamental, MAX_HARMONICS);
   float value = 0.0f;
   for (int k = 1; k <= max_harmonic; ++k) {
     value += sinf(2.0f * M_PI * fundamental * k * t) / k;
@@ -296,8 +295,6 @@ static HighPassFilter hp_filter_lead(100.0f); // Set your cutoff in Hz
 static LowPassFilter lp_filter_kick(400.0f);  // Set your cutoff in Hz
 
 // IVAN
-//
-//
 static void callback(void *buffer, unsigned int frames) {
   static float demo_time = 0.0f;
   static float dt = 1.0f / SR;
@@ -309,59 +306,45 @@ static void callback(void *buffer, unsigned int frames) {
   for (unsigned int i = 0; i < frames; ++i) {
     float sample = 0.0f;
     const float bar_time = fmodf(demo_time, 4.0f);
-
     if (demo_time < 8.0) {
       for (int b = 0; b < 8; ++b) {
         float onset1 = b * 0.5f;
         float env1 = adsr(bar_time, ADSR(onset1, 0.5f, 0.5f, 0.05f, 0.2f,
                                          0.05f)); // Lead Synth tune
         sample += 0.1f * env1 * osc_square(demo_time, NOTE_AS / 4 - 20);
-        // sample = hp_filter_lead.process(sample);
       }
     }
 
     /// 2nd part // lead + kick // up to 24.0
     else if (demo_time < 31.0) {
       for (int b = 0; b < 8; ++b) {
-
         float onset1 = b * 0.5f;
         float onset2 = b * 0.25f;
-
         float env2 = adsr(bar_time, ADSR(onset2, 0.5f, 0.005f, 0.004f, 0.001f,
                                          0.003f)); // Kick tune
         sample += 2.0f * env2 * osc_sawtooth(demo_time, NOTE_A / 4 - 20);
         sample = lp_filter_kick.process(sample);
-
         float env1 = adsr(bar_time, ADSR(onset1, 0.5f, 0.5f, 0.05f, 0.2f,
                                          0.05f)); // Lead Synth tune
         sample += 0.1f * env1 * osc_square(demo_time, NOTE_AS / 4 - 20);
       }
-    }
-
-    /// third part // lead + kick + pitchslide // up to 32.0
-    else if (demo_time < 42.0) {
-
+    } else if (demo_time < 42.0) {
       for (int b = 0; b < 8; ++b) {
-
         float onset1 = b * 0.5f;
         float onset2 = b * 0.25f;
-
         float env2 = adsr(bar_time, ADSR(onset2, 0.5f, 0.005f, 0.004f, 0.001f,
                                          0.003f)); // Kick tune
         sample += 2.0f * env2 * osc_sawtooth(demo_time, NOTE_A / 4 - 20);
         sample = lp_filter_kick.process(sample);
-
         float env3 = adsr(bar_time, ADSR(onset2, 0.4f, 0.005f, 0.004f, 0.2f,
                                          0.003f)); // Mario 8bit pitch slide
         // sample += 0.3f * env3 * osc_square(demo_time,
         // NOTE_DS+0.03*onset2*NOTE_DS );
         sample += 0.8f * env3 * osc_sawtooth(demo_time, NOTE_A + 4 * b);
-
         float env1 = adsr(bar_time, ADSR(onset1, 0.5f, 0.5f, 0.05f, 0.2f,
                                          0.05f)); // Lead Synth tune
         sample += 0.1f * env1 * osc_square(demo_time, NOTE_AS / 4 - 20);
       }
-
       /// Cental part 1 // lead + kick  // after 42 and up to 90
     } else if (demo_time < 90.0) {
 
@@ -370,23 +353,19 @@ static void callback(void *buffer, unsigned int frames) {
         float env_fat = adsr(bar_time, ADSR(onset2, 0.4f, 0.005f, 0.05f, 0.3f,
                                             0.2f)); // FAT synth tune
         sample += 0.4f * env_fat * osc_square(demo_time, NOTE_B / 4 - 62);
-
         if (demo_time > 50.0) { // if more than 50.0 !!!!!
-
           float onset_kick = b * 0.5f;
           float env_kick =
               adsr(bar_time, ADSR(onset_kick, 0.75f, 0.005f, 0.005f, 0.002f,
                                   0.005f)); // Kick tune
           sample += 1.7f * env_kick * osc_sawtooth(demo_time, NOTE_A / 4);
         }
-
         if (demo_time > 58.0) { // if more than 58.0 !!!!!
           float onset_noiz = b * 1.0f + 0.25;
           float env_kick = adsr(bar_time, ADSR(onset_noiz, 0.75f, 0.04f, 0.005f,
                                                0.003f, 0.005f)); // noise1
           sample += 1.0f * env_kick * noise();
         }
-
         if (demo_time > 66.0) { // if more than 66.0 !!!!!
           float onset_crush = b * 1.0f + 0.5;
           float env_crush =
@@ -395,116 +374,82 @@ static void callback(void *buffer, unsigned int frames) {
           sample += 1.f * env_crush * noise();
           sample += 1.f * env_crush * osc_sawtooth(demo_time, NOTE_B / 4);
         }
-
         if (demo_time > 74.0) { // if more than 74.0 !!!!!
-          // float onset_crush1 = b * 1.0f + 0.5;
           float onset_crush2 = b * 1.0f + 0.6;
-
           float env_crush2 =
               adsr(bar_time, ADSR(onset_crush2, 0.075f, 0.04f, 0.05f, 0.03f,
                                   0.005f)); // melodic noise 2
           sample += 1.f * env_crush2 * noise();
           sample += 1.f * env_crush2 * osc_sawtooth(demo_time, NOTE_D / 4);
         }
-
       } // end of b loop
-
-    } // end of central part 1
-
-    else if (demo_time < 98.0) { // FINAL PART 1
-
+    }else if (demo_time < 98.0) { // FINAL PART 1
       for (int b = 0; b < 4; ++b) {
         float onset_crush1 = b * 1.0f + 0.5;
         float onset_crush2 = b * 1.0f + 0.6;
         // float onset_lead_central = b * 1.0f + 0.75;
         float onset_kick = b * 0.5f;
-
         float env_kick = adsr(bar_time, ADSR(onset_kick, 0.75f, 0.005f, 0.005f,
                                              0.002f, 0.005f)); // Kick tune
         sample += 1.7f * env_kick * osc_sawtooth(demo_time, NOTE_A / 4);
-
         float env_crush1 =
             adsr(bar_time, ADSR(onset_crush1, 0.075f, 0.04f, 0.05f, 0.03f,
                                 0.005f)); // melodic noise 2
         sample += 1.f * env_crush1 * noise();
         sample += 1.f * env_crush1 * osc_sawtooth(demo_time, NOTE_B / 4);
-
         float env_crush2 =
             adsr(bar_time, ADSR(onset_crush2, 0.075f, 0.04f, 0.05f, 0.03f,
                                 0.005f)); // melodic noise 2
         sample += 1.f * env_crush2 * noise();
         sample += 1.f * env_crush2 * osc_sawtooth(demo_time, NOTE_D / 4);
       }
-
-    }
-
-    else if (demo_time < 98.0) { // FINAL PART 2
-
+    }else if (demo_time < 98.0) { // FINAL PART 2
       for (int b = 0; b < 4; ++b) {
         float onset_crush1 = b * 1.0f + 0.5;
         // float onset_crush2 = b * 1.0f + 0.6;
         // float onset_lead_central = b * 1.0f + 0.75;
         float onset_kick = b * 0.5f;
-
         float env_kick = adsr(bar_time, ADSR(onset_kick, 0.75f, 0.005f, 0.005f,
                                              0.002f, 0.005f)); // Kick tune
         sample += 1.7f * env_kick * osc_sawtooth(demo_time, NOTE_A / 4);
-
         float env_crush1 =
             adsr(bar_time, ADSR(onset_crush1, 0.075f, 0.04f, 0.05f, 0.03f,
                                 0.005f)); // melodic noise 2
         sample += 1.f * env_crush1 * noise();
         sample += 1.f * env_crush1 * osc_sawtooth(demo_time, NOTE_B / 4);
       }
-
-    }
-
-    else if (demo_time < 106.0) { // FINAL PART 3
-
+    }else if (demo_time < 106.0) { // FINAL PART 3
       for (int b = 0; b < 4; ++b) {
         // float onset_crush1 = b * 1.0f + 0.5;
         // float onset_crush2 = b * 1.0f + 0.6;
         // float onset_lead_central = b * 1.0f + 0.75;
         float onset_kick = b * 0.5f;
-
         float env_kick = adsr(bar_time, ADSR(onset_kick, 0.75f, 0.005f, 0.005f,
                                              0.002f, 0.005f)); // Kick tune
         sample += 1.7f * env_kick * osc_sawtooth(demo_time, NOTE_A / 4);
       }
-
-    }
-
-    else if (demo_time < 112.0) { // FINAL PART 4
-
+    }else if (demo_time < 112.0) { // FINAL PART 4
       for (int b = 0; b < 4; ++b) {
         // float onset_crush1 = b * 1.0f + 0.5;
         // float onset_crush2 = b * 1.0f + 0.6;
         // float onset_lead_central = b * 1.0f + 0.75;
         float onset_kick = b * 0.5f;
-
         float env_kick = adsr(bar_time, ADSR(onset_kick, 0.75f, 0.005f, 0.005f,
                                              0.002f, 0.005f)); // Kick tune
         sample += 1.7f * env_kick * osc_sawtooth(demo_time, NOTE_A / 4);
       }
-
-    }
-
-    else if (demo_time < 120.0) { // FINAL PART 5
-
+  }else if (demo_time < 120.0) { // FINAL PART 5
       for (int b = 0; b < 4; ++b) {
         float onset_kick = b * 0.5f;
         float onset_synth = 0.001f;
-
         float env_kick = adsr(bar_time, ADSR(onset_kick, 0.75f, 0.005f, 0.005f,
                                              0.002f, 0.005f)); // Kick tune
         sample += 1.7f * env_kick * osc_sawtooth(demo_time, NOTE_A / 4);
-
         float env1 = adsr(bar_time, ADSR(onset_synth, 0.01f, 0.01f, 0.05f, 0.2f,
                                          0.5f)); // Lead Synth tune
         sample += 0.1f * env1 * osc_square(demo_time, NOTE_AS / 4 - 20);
       }
     }
-
     sample = clamp(sample, -1.0f, 1.0f);
     d[2 * i] = sample;
     d[2 * i + 1] = sample;
@@ -1009,22 +954,22 @@ void draw_real_fft() {
   }
   const float W = GetScreenWidth();
   const float H = GetScreenHeight();
-  const char* msg  ="Fastest Fourier Transform in the North";
+  const char *msg = "Fastest Fourier Transform in the North";
   const int sz = MeasureText(msg, 20);
   const float pad = 20;
-  const float plotW = fmax(1.2*sz,W * 0.2f);
-  const float plotH = plotW/4.5;
+  const float plotW = fmax(1.2 * sz, W * 0.2f);
+  const float plotH = plotW / 4.5;
   const float plotX = 2 * pad;
   const float plotY = H - plotH - 2 * pad;
   const int ticksX = 5;
   const int ticksY = 4;
 
-  const float minFreq = 20.0f; 
+  const float minFreq = 20.0f;
   const float maxFreq = NYQUIST;
   const float logMin = log10f(minFreq);
   const float logMax = log10f(maxFreq);
 
-  //Normalization By max 
+  // Normalization By max
   float maxPower = -100000.0f;
   for (size_t i = 0; i < fft_size; ++i) {
     float mag = fft_data[i] * fft_data[i];
@@ -1063,7 +1008,8 @@ void draw_real_fft() {
 
   for (size_t i = 0; i < fft_size; ++i) {
     const float freq = (i / (float)(fft_size - 1)) * NYQUIST;
-    if (freq < minFreq) continue;
+    if (freq < minFreq)
+      continue;
     const float power = fft_data[i] * fft_data[i];
     const float logf = log10f(freq);
     const int bin = (int)((logf - logMin) / (logMax - logMin) * (log_bins - 1));
@@ -1076,7 +1022,7 @@ void draw_real_fft() {
   for (int i = 0; i < log_bins; ++i) {
     if (binCounts[i] > 0)
       logPowers[i] /= binCounts[i];
-    //clamp to 0.9 otherwise it looks like shit
+    // clamp to 0.9 otherwise it looks like shit
     logPowers[i] = clamp(logPowers[i] / maxPower, 0.0f, 0.9f);
   }
 
@@ -1086,11 +1032,11 @@ void draw_real_fft() {
     const float y0 = plotY + plotH * (1.0f - logPowers[i]);
     const float y1 = plotY + plotH * (1.0f - logPowers[i + 1]);
     // DrawLineEx((Vector2){x0, y0}, (Vector2){x1, y1}, 2.0f, GREEN);
-    if (logPowers[i]>0.2){
-      DrawLineEx((Vector2){x0, (plotY + plotH)},(Vector2){x0, y0}, 1.0f, LIME);
-      DrawLineEx((Vector2){x1, (plotY + plotH)},(Vector2){x0, y0}, 1.0f, LIME);
-      DrawCircleV(Vector2{x0, y0}, 3 ,GOLD);
-      DrawCircleV(Vector2{x1, y1}, 3 ,GOLD);
+    if (logPowers[i] > 0.2) {
+      DrawLineEx((Vector2){x0, (plotY + plotH)}, (Vector2){x0, y0}, 1.0f, LIME);
+      DrawLineEx((Vector2){x1, (plotY + plotH)}, (Vector2){x0, y0}, 1.0f, LIME);
+      DrawCircleV(Vector2{x0, y0}, 3, GOLD);
+      DrawCircleV(Vector2{x1, y1}, 3, GOLD);
     }
     // DrawPixel(x0, y0, RED);
   }
@@ -1139,15 +1085,15 @@ static size_t intro(Scene *sc, BumpAllocator *arena, float dur) {
       auto ps2 = Vector3Scale(p2, 24.0f);
       Vector2 cand1 = Vector2{ps1.x + (W / 2) + (W / 8), ps1.y + (H / 2)};
       Vector2 cand2 = Vector2{ps2.x + (W / 2) + (W / 8), ps2.y + (H / 2)};
-      points[point_counter] = Vector2{cand1.x/W,cand1.y/H};
-      points[point_counter + 1] = Vector2{cand2.x/W,cand2.y/H};
+      points[point_counter] = Vector2{cand1.x / W, cand1.y / H};
+      points[point_counter + 1] = Vector2{cand2.x / W, cand2.y / H};
       point_counter += 2;
       p1 = getAttractor(p1, dt / 2);
       p2 = getAttractor(p2, dt / 2);
     }
     ClearBackground(BLACK);
     for (size_t i = 0; i < point_counter; ++i) {
-      DrawCircle(W*points[i].x,H*points[i].y, 1, i % 2 == 0 ? RED : BLUE);
+      DrawCircle(W * points[i].x, H * points[i].y, 1, i % 2 == 0 ? RED : BLUE);
     }
     DrawText(msg, W / 4.0f - 0.5 * text_width, H / 2.0f, FONTSIZE, GOLD);
     if (show_fft) {
@@ -1214,7 +1160,7 @@ static void post_intro(Scene *sc, BumpAllocator *arena, float dur) {
                          1024 * 1024 * sizeof(float));
       flag = false;
       demo_ast(sc, arena, &tmp1, 2, 8);
-      point_counter=0;
+      point_counter = 0;
       actual_time = store + GetFrameTime();
       continue;
     }
@@ -1236,14 +1182,14 @@ static void post_intro(Scene *sc, BumpAllocator *arena, float dur) {
       }
     }
     ClearBackground(BLACK);
-    //Skip this for upcoming AST graphic
+    // Skip this for upcoming AST graphic
     if (!(actual_time > 20.0 && actual_time <= 26)) {
       for (size_t i = 0; i < point_counter; ++i) {
         DrawCircle(W * points[i].x, H * points[i].y, 1,
                    i % 2 == 0 ? GOLD : PINK);
       }
     }
-   
+
     if (actual_time > 20.0 && actual_time <= 26) {
       const float anim_dt = 0.25f;
       float fontSize = 32;
@@ -1524,8 +1470,6 @@ int jump_start() {
   constexpr int seed = 512; // Adam no touch! (0:142) (1:512)
   constexpr size_t SCENE_MEMORY_POOL = 1024ul * 1024ul * 1024ul;
   constexpr size_t MUSIC_MEMORY_POOL = 1024ul * 1024ul * 1024ul;
-  constexpr int screenWidth = 2 * 72 * 16;
-  constexpr int screenHeight = 2 * 72 * 9;
   constexpr float intro_dur = 12.0f;
   constexpr float post_intro_1_dur = 31.0f;
   constexpr float demo_dur = 60.0f;
@@ -1555,10 +1499,12 @@ int jump_start() {
 
   // clang-format off
   SetTraceLogLevel(TraceLogLevel::LOG_NONE);
-  InitWindow(screenWidth, screenHeight, "");
-  SetWindowState(FLAG_WINDOW_RESIZABLE );
+  InitWindow(GetScreenWidth(), GetScreenHeight(), "");
+  SetWindowState(FLAG_WINDOW_RESIZABLE);
   // ToggleFullscreen();
-  
+  const int screenWidth  = GetScreenWidth();
+  const int screenHeight = GetScreenHeight();;
+  printf("WxH= %d %d\n",screenWidth,screenHeight);
 
   // wait();
   SetExitKey(KEY_ESCAPE);
