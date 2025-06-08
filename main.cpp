@@ -1101,7 +1101,7 @@ static const char *intro_post1_texts(float t) {
     return "Today we produce \n abstract graphics using \n random ASTs.";
   }
   if (t >= 3.0 && t < 8.0) {
-    return "An AST is an \n Asbtract Synatx Tree!";
+    return "An AST is an \n Abstract Syntax Tree!";
   }
   if (t >= 8.0 && t < 12.0) {
     return "Today each AST node \n is an operator.";
