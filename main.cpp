@@ -8,7 +8,7 @@
 float *fft_data;
 size_t fft_size;
 size_t ncallbacks = 0;
-bool show_fft = true;
+bool show_fft = false;
 //! Global handle
 
 struct BumpAllocator {
@@ -84,7 +84,7 @@ static constexpr inline uint32_t nextPow2(uint32_t v) noexcept {
   return v;
 }
 
-constexpr int FONTSIZE = 50;
+constexpr int FONTSIZE = 100;
 constexpr float AST_INTERVAL = 8.0f;
 constexpr float NOTE_C = 261.63;
 constexpr float NOTE_CS = 277.18;
@@ -1086,7 +1086,7 @@ static size_t intro(Scene *sc, BumpAllocator *arena, float dur) {
     for (size_t i = 0; i < point_counter; ++i) {
       DrawCircle(W * points[i].x, H * points[i].y, 1, i % 2 == 0 ? RED : BLUE);
     }
-    DrawText(msg, 32, 0.2 * H, FONTSIZE, GOLD);
+    DrawText(msg, 0.25*W, 0.5 * H +osc_sine(GetTime(), 0.2)*32*sinf(2.0*M_PI*0.5*GetTime()), FONTSIZE, GOLD);
     if (show_fft) {
       draw_real_fft();
     }
@@ -1180,6 +1180,7 @@ static void post_intro(Scene *sc, BumpAllocator *arena, float dur) {
       }
     }
 
+
     if (actual_time > 20.0 && actual_time <= 26) {
       const float anim_dt = 0.25f;
       float fontSize = 32;
@@ -1188,7 +1189,7 @@ static void post_intro(Scene *sc, BumpAllocator *arena, float dur) {
       DrawEllipse(rootX, rootY, 64, 32, RED);
       const char *text = "sin";
       int textWidth = MeasureText(text, fontSize);
-      DrawText(text, rootX - textWidth / 2.0f, rootY - fontSize / 2.0f,
+      DrawText(text, rootX - textWidth / 2.0f, rootY - fontSize / 2.0f +osc_sine(GetTime(), 0.1)*16*sinf(2.0*M_PI*0.5*GetTime()),
                fontSize, RAYWHITE);
       if (actual_time < 19.5)
         goto checkpoint;
@@ -1313,7 +1314,7 @@ static void post_intro(Scene *sc, BumpAllocator *arena, float dur) {
       DrawLine(sinY_X, sinY_Y + 32, yX, yY - 32, LIGHTGRAY);
     }
   checkpoint:
-    DrawText(msg, 32, 0.2 * H, FONTSIZE, GOLD);
+    DrawText(msg, 32, 0.2 * H +osc_sine(GetTime(), 0.1)*16*sinf(2.0*M_PI*0.5*GetTime()), FONTSIZE, GOLD);
     actual_time += GetFrameTime();
     if (show_fft) {
       draw_real_fft();
@@ -1523,6 +1524,7 @@ int jump_start() {
           constexpr  int depth = 8;
           demo_ast(&scene, &scene_arena, &music_arena, 2,depth,false);
           scene_arena.release();
+          show_fft=true;
           demo_march(&scene, &scene_arena, &music_arena, 8,0.5,0,0,0);
           scene_arena.release();
           demo_ast(&scene, &scene_arena, &music_arena, 2,depth,false);

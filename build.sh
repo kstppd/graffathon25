@@ -22,5 +22,5 @@ g++ -c ${EXTRA} main.cpp ${INC_FLAGS} ${CXX_FLAGS}
 g++  ${EXTRA}   start.o  main.o  ${LD_FLAGS} -lc -lm -lraylib -o demo
 strip -S --strip-unneeded --remove-section=.note.gnu.gold-version --remove-section=.comment --remove-section=.note --remove-section=.note.gnu.build-id --remove-section=.note.ABI-tag demo
 rm start.o main.o
-clear
+# clear
 ls -ahl demo
