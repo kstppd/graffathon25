@@ -31,7 +31,6 @@ struct BumpAllocator {
     if (count == 0) {
       return nullptr;
     }
-    return (T*)malloc(count*sizeof(T));
     const size_t bytesToAllocate = count * sizeof(T);
     const size_t alignment = fmax(alignof(T), size_t(8));
 
@@ -323,7 +322,8 @@ static void callback(void *buffer, unsigned int frames) {
         float env2 = adsr(bar_time, ADSR(onset2, 0.5f, 0.005f, 0.004f, 0.001f,
                                          0.003f)); // Kick tune
         sample += 2.0f * env2 * osc_sawtooth(demo_time, NOTE_A / 4 - 20);
-        sample = lp_filter_kick.process(sample);
+        // sample = lp_filter_kick.process(sample);
+        sample=LPF(sample,prev, alpha(400.0f));
         float env1 = adsr(bar_time, ADSR(onset1, 0.5f, 0.5f, 0.05f, 0.2f,
                                          0.05f)); // Lead Synth tune
         sample += 0.1f * env1 * osc_square(demo_time, NOTE_AS / 4 - 20);
@@ -335,7 +335,7 @@ static void callback(void *buffer, unsigned int frames) {
         float env2 = adsr(bar_time, ADSR(onset2, 0.5f, 0.005f, 0.004f, 0.001f,
                                          0.003f)); // Kick tune
         sample += 2.0f * env2 * osc_sawtooth(demo_time, NOTE_A / 4 - 20);
-        sample = lp_filter_kick.process(sample);
+        sample=LPF(sample,prev, alpha(400.0f));
         float env3 = adsr(bar_time, ADSR(onset2, 0.4f, 0.005f, 0.004f, 0.2f,
                                          0.003f)); // Mario 8bit pitch slide
         // sample += 0.3f * env3 * osc_square(demo_time,
